@@ -23,9 +23,9 @@ The team score for each hole is the **higher** of the two players' scores. The t
 
 ## Replay controls
 
-The replay autoplays once, stopping after the final steal. Use play/pause, previous/next, the speed selector, or the timeline slider to inspect any state. Scrubbing pauses playback. The featured pair of scorecards keeps both swapped cells visible, with two flying scores and updated totals; all teams remain visible in the grid below. The final steal in the supplied data exchanges two `1` scores, so it correctly leaves both values unchanged.
+The replay autoplays once, stopping after the final steal. Use play/pause, previous/next, the speed selector, or the timeline slider to inspect any state. Scrubbing pauses playback. Featured cards match the Scores grid's card sizes. When a featured team changes, its card slides in like a card being shuffled into a deck. The score exchange then plays in both sections with the same values and timing; the theft is applied only once. Equal-valued scores still swap, with no change to cell values.
 
-Reduced-motion preferences disable autoplay and flying-score animations; manual timeline controls still work. Playback also pauses when the tab is hidden.
+Pause freezes active card and score animations as well as playback; Play resumes them. Scrubbing or resizing cancels old animations and shows the selected state. Scrolling does not interrupt the synchronized score exchanges. Reduced-motion preferences disable autoplay and both animation types; manual timeline controls still work. Playback also pauses when the tab is hidden.
 
 ## Styling
 
@@ -46,3 +46,13 @@ The scoring engine tests use only Node's built-in test runner (no installation):
 ```powershell
 node --test tests\engine.test.cjs
 ```
+
+Engine regression tests keep the original round in `tests/fixtures/`, separate from the editable CSVs. They also validate the current round.
+
+Browser regression tests require Node 22+ and Chrome or Edge on Windows (or set `CHROME_PATH` to a Chromium executable). They start their own local server and check card sizes, synchronized animations, cancellation, pause/resume, and reduced motion against the current round:
+
+```powershell
+node --test tests\browser.test.cjs
+```
+
+Set `SCREENSHOT_DIR` to save desktop, mobile, deck-transition, and score-swap screenshots during the browser run.

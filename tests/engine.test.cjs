@@ -3,8 +3,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const engine = require("../engine.js");
-const scoresCSV = fs.readFileSync(path.join(__dirname, "..", "data", "scorecards.csv"), "utf8");
-const theftsCSV = fs.readFileSync(path.join(__dirname, "..", "data", "thefts.csv"), "utf8");
+const scoresCSV = fs.readFileSync(path.join(__dirname, "fixtures", "scorecards.csv"), "utf8");
+const theftsCSV = fs.readFileSync(path.join(__dirname, "fixtures", "thefts.csv"), "utf8");
 const teams = engine.parseScorecards(scoresCSV);
 const thefts = engine.parseThefts(theftsCSV, teams);
 const states = engine.snapshots(teams, thefts);
@@ -65,4 +65,13 @@ test("ties share a rank and an empty log keeps the original state", () => {
   assert.deepEqual(engine.ranks(same), { 1: 1, 99: 1 });
   assert.equal(engine.parseThefts(theftsCSV.split("\n")[0], teams).length, 0);
   assert.deepEqual(engine.snapshots(teams, []), [teams]);
+});
+
+test("the editable round is valid and every swap preserves its scores", () => {
+  const configuredTeams = engine.parseScorecards(fs.readFileSync(path.join(__dirname, "..", "data", "scorecards.csv"), "utf8"));
+  const configuredThefts = engine.parseThefts(fs.readFileSync(path.join(__dirname, "..", "data", "thefts.csv"), "utf8"), configuredTeams);
+  const configuredStates = engine.snapshots(configuredTeams, configuredThefts);
+  const values = state => state.flatMap(t => t.players.flatMap(p => p.scores)).sort((a, b) => a - b);
+  assert.equal(configuredStates.length, configuredThefts.length + 1);
+  configuredStates.forEach(state => assert.deepEqual(values(state), values(configuredTeams)));
 });

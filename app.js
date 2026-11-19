@@ -4,8 +4,12 @@ const engine = GolfReplay;
 const $ = id => document.getElementById(id);
 let states = [], thefts = [], current = 0, playing = false, timer;
 let revision = 0;
+let motionPaused = false;
+let pendingMotion = false;
 const activeAnimations = new Set();
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const SHUFFLE_DURATION = 380;
+const SCORE_DURATION = 1250;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -64,14 +68,28 @@ function card(team, rank, options = {}) {
   return article;
 }
 function clearMotion() {
+  revision++;
+  motionPaused = false;
+  pendingMotion = false;
   for (const animation of activeAnimations) animation.cancel();
   activeAnimations.clear();
-  document.querySelectorAll(".flying-score").forEach(node => node.remove());
+  document.querySelectorAll(".flying-score, .departing-card").forEach(node => node.remove());
+  document.querySelectorAll(".is-shuffling").forEach(node => node.classList.remove("is-shuffling"));
+}
+function motion(node, frames, options, startTime, finish = () => {}) {
+  const animation = node.animate(frames, options);
+  animation.startTime = startTime;
+  activeAnimations.add(animation);
+  animation.onfinish = () => {
+    activeAnimations.delete(animation);
+    finish();
+  };
+  return animation;
 }
 function render(step, animate = false) {
-  revision++;
   clearMotion();
   const token = revision, old = current;
+  const oldCards = [...$("swap-stage").querySelectorAll(".featured-slot > .scorecard")];
   current = step;
   const state = states[step], rank = engine.ranks(state);
   const theft = thefts[step === 0 ? 0 : step - 1];
@@ -109,44 +127,89 @@ function render(step, animate = false) {
     a: engine.teamScore(previous.find(team => team.id === a.id)).total,
     b: engine.teamScore(previous.find(team => team.id === b.id)).total
   } : {};
-  stage.append(card(a, rank[a.id], { role: "stealing", cell: theft.stealer, before: before.a }));
-  const connector = el("div", "swap-connector");
-  connector.append(el("span", "", "⇄"), el("small", "", step ? "Swapped" : "Next"));
-  stage.append(connector, card(b, rank[b.id], { role: "stolen", cell: theft.victim, before: before.b }));
-  if (animate && step === old + 1 && !reducedMotion.matches) {
-    // Measure after the replacement cards have settled into the layout.
-    requestAnimationFrame(() => { if (token === revision) animateSwap(theft, previous); });
+  const shuffles = [];
+  [card(a, rank[a.id], { role: "stealing", cell: theft.stealer, before: before.a }),
+    card(b, rank[b.id], { role: "stolen", cell: theft.victim, before: before.b })].forEach((incoming, index) => {
+    const slot = el("div", "featured-slot");
+    slot.append(incoming);
+    const outgoing = oldCards[index];
+    if (outgoing && outgoing.dataset.teamId !== incoming.dataset.teamId && !reducedMotion.matches) {
+      outgoing.classList.add("departing-card");
+      outgoing.setAttribute("aria-hidden", "true");
+      outgoing.inert = true;
+      outgoing.querySelectorAll("[data-cell]").forEach(cell => cell.removeAttribute("data-cell"));
+      slot.append(outgoing);
+      shuffles.push({ slot, incoming, outgoing });
+    }
+    stage.append(slot);
+  });
+  if (!reducedMotion.matches) {
+    pendingMotion = true;
+    requestAnimationFrame(() => {
+      if (token !== revision) return;
+      pendingMotion = false;
+      const start = document.timeline.currentTime;
+      // Measure score routes before deck transforms move the featured cards.
+      if (animate && step === old + 1) {
+        animateSwap(theft, previous, start + (shuffles.length ? SHUFFLE_DURATION : 0));
+      }
+      animateDeck(shuffles, start);
+      if (motionPaused) {
+        for (const animation of activeAnimations) animation.pause();
+      }
+    });
   }
 }
-function animateSwap(theft, before) {
-  const stage = $("swap-stage");
-  const locate = cell => stage.querySelector(`[data-cell="${cell.teamId}-${cell.player}-${cell.hole}"]`);
-  const a = locate(theft.stealer), b = locate(theft.victim);
-  if (!a || !b) return;
-  const boxA = a.getBoundingClientRect(), boxB = b.getBoundingClientRect();
-  [[boxA, boxB, engine.getCell(before, theft.stealer), "outbound"], [boxB, boxA, engine.getCell(before, theft.victim), "inbound"]].forEach(([from, to, value, direction], index) => {
-    const chip = el("div", `flying-score ${direction}`, String(value));
-    chip.setAttribute("aria-hidden", "true");
-    chip.style.left = `${from.left + from.width / 2 - 20}px`;
-    chip.style.top = `${from.top + from.height / 2 - 20}px`;
-    document.body.append(chip);
-    const x = to.left - from.left + (to.width - from.width) / 2;
-    const y = to.top - from.top + (to.height - from.height) / 2;
-    const animation = chip.animate([
-      { transform: "translate(0, 0) scale(.8)", opacity: 0 },
-      { transform: "translate(0, 0) scale(1.1)", opacity: 1, offset: .12 },
-      { transform: `translate(${x / 2}px, ${y / 2 + (index ? 75 : -75)}px) scale(1.2)`, opacity: 1, offset: .5 },
-      { transform: `translate(${x}px, ${y}px) scale(1)`, opacity: 1, offset: .9 },
-      { transform: `translate(${x}px, ${y}px) scale(.8)`, opacity: 0 }
-    ], { duration: 1250, easing: "ease-in-out" });
-    activeAnimations.add(animation);
-    animation.onfinish = () => { chip.remove(); activeAnimations.delete(animation); };
+function animateDeck(shuffles, startTime) {
+  shuffles.forEach(({ slot, incoming, outgoing }, index) => {
+    const direction = index % 2 ? -1 : 1;
+    slot.classList.add("is-shuffling");
+    motion(outgoing, [
+      { transform: "translate(0, 0) rotate(0)", opacity: 1 },
+      { transform: `translate(${-direction * 20}px, 10px) rotate(${-direction * 4}deg)`, opacity: .7, offset: .55 },
+      { transform: `translate(${-direction * 28}px, 18px) rotate(${-direction * 6}deg)`, opacity: 0 }
+    ], { duration: SHUFFLE_DURATION, easing: "ease-in", fill: "backwards" }, startTime, () => outgoing.remove());
+    motion(incoming, [
+      { transform: `translate(${direction * 36}px, -22px) rotate(${direction * 6}deg)`, opacity: 0, boxShadow: "0 12px 24px #0003" },
+      { transform: `translate(${direction * 8}px, -8px) rotate(${direction * 2}deg)`, opacity: 1, offset: .45 },
+      { transform: "translate(0, 0) rotate(0)", opacity: 1, boxShadow: "0 0 0 #0000" }
+    ], { duration: SHUFFLE_DURATION, easing: "cubic-bezier(.2,.7,.25,1)", fill: "backwards" }, startTime,
+    () => slot.classList.remove("is-shuffling"));
   });
-  [a, b].forEach(cell => {
-    const animation = cell.animate([{ opacity: .15 }, { opacity: .15, offset: .8 }, { opacity: 1 }], { duration: 1300 });
-    activeAnimations.add(animation);
-    animation.onfinish = () => activeAnimations.delete(animation);
+}
+function animateSwap(theft, before, startTime) {
+  [$("swap-stage"), $("scorecards")].forEach(container => {
+    const locate = cell => container.querySelector(`[data-cell="${cell.teamId}-${cell.player}-${cell.hole}"]`);
+    const a = locate(theft.stealer), b = locate(theft.victim);
+    const boxA = a.getBoundingClientRect(), boxB = b.getBoundingClientRect();
+    [[boxA, boxB, engine.getCell(before, theft.stealer), "outbound"],
+      [boxB, boxA, engine.getCell(before, theft.victim), "inbound"]].forEach(([from, to, value, direction], index) => {
+      const chip = el("div", `flying-score ${direction}`, String(value));
+      chip.dataset.section = container.id;
+      chip.setAttribute("aria-hidden", "true");
+      chip.style.left = `${from.left + window.scrollX + from.width / 2 - 20}px`;
+      chip.style.top = `${from.top + window.scrollY + from.height / 2 - 20}px`;
+      document.body.append(chip);
+      const x = to.left - from.left + (to.width - from.width) / 2;
+      const y = to.top - from.top + (to.height - from.height) / 2;
+      motion(chip, [
+        { transform: "translate(0, 0) scale(.8)", opacity: 0 },
+        { transform: "translate(0, 0) scale(1.1)", opacity: 1, offset: .12 },
+        { transform: `translate(${x / 2}px, ${y / 2 + (index ? 60 : -60)}px) scale(1.2)`, opacity: 1, offset: .5 },
+        { transform: `translate(${x}px, ${y}px) scale(1)`, opacity: 1, offset: .9 },
+        { transform: `translate(${x}px, ${y}px) scale(.8)`, opacity: 0 }
+      ], { duration: SCORE_DURATION, easing: "ease-in-out", fill: "both" }, startTime, () => chip.remove());
+    });
+    [a, b].forEach(cell => {
+      motion(cell, [{ opacity: 0 }, { opacity: 0, offset: .9 }, { opacity: 1 }],
+        { duration: SCORE_DURATION, fill: "backwards" }, startTime);
+    });
   });
+}
+function pausePlayback() {
+  motionPaused = true;
+  for (const animation of activeAnimations) animation.pause();
+  setPlaying(false);
 }
 function setPlaying(value) {
   playing = value;
@@ -154,7 +217,7 @@ function setPlaying(value) {
   const label = value ? "Pause" : current === thefts.length && thefts.length ? "Replay" : "Play";
   $("play").replaceChildren(document.createTextNode(value ? "Ⅱ " : "▶ "), el("span", "", label));
   $("play").setAttribute("aria-label", label);
-  $("play-state").textContent = value ? "PLAYING" : current === thefts.length ? "COMPLETE" : "PAUSED";
+  $("play-state").textContent = value ? "PLAYING" : current === thefts.length && !activeAnimations.size ? "COMPLETE" : "PAUSED";
   $("play-state").classList.toggle("is-playing", value);
   if (value) schedule();
 }
@@ -162,10 +225,13 @@ function schedule() {
   clearTimeout(timer);
   timer = setTimeout(() => {
     if (!playing) return;
-    if (current < thefts.length) render(current + 1, true);
-    if (current === thefts.length) setPlaying(false);
-    else schedule();
-  }, Number($("speed").value));
+    if (current === thefts.length) {
+      setPlaying(false);
+      return;
+    }
+    render(current + 1, true);
+    schedule();
+  }, current === thefts.length ? SHUFFLE_DURATION + SCORE_DURATION + 50 : Number($("speed").value));
 }
 function jump(step, animate = false) {
   setPlaying(false);
@@ -173,16 +239,28 @@ function jump(step, animate = false) {
   setPlaying(false);
 }
 $("play").addEventListener("click", () => {
-  if (!playing && current === thefts.length) render(0);
-  setPlaying(!playing);
+  if (playing) {
+    pausePlayback();
+    return;
+  }
+  const pausedMotion = (pendingMotion && motionPaused) || [...activeAnimations].some(animation => animation.playState === "paused");
+  if (current === thefts.length && !pausedMotion) render(0);
+  motionPaused = false;
+  for (const animation of activeAnimations) animation.play();
+  setPlaying(true);
 });
 $("previous").addEventListener("click", () => jump(Math.max(0, current - 1)));
 $("next").addEventListener("click", () => jump(Math.min(thefts.length, current + 1), true));
 $("timeline").addEventListener("input", event => jump(Number(event.target.value)));
 $("speed").addEventListener("change", () => { if (playing) schedule(); });
-document.addEventListener("visibilitychange", () => { if (document.hidden && playing) setPlaying(false); });
+document.addEventListener("visibilitychange", () => { if (document.hidden && playing) pausePlayback(); });
 window.addEventListener("resize", clearMotion);
-window.addEventListener("scroll", clearMotion, { passive: true });
+reducedMotion.addEventListener("change", () => {
+  if (reducedMotion.matches) {
+    clearMotion();
+    setPlaying(false);
+  }
+});
 
 async function load() {
   try {
