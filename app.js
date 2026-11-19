@@ -6,6 +6,11 @@ let states = [], thefts = [], current = 0, playing = false, timer;
 let revision = 0;
 let motionPaused = false;
 let pendingMotion = false;
+let progressAnimation;
+let intervalStarted = null;
+let intervalFraction = 0;
+let intervalDuration = 0;
+let elapsedFraction = 0;
 const activeAnimations = new Set();
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const FLIP_DURATION = 500;
@@ -101,7 +106,36 @@ function motion(node, frames, options, startTime, finish = () => {}) {
   };
   return animation;
 }
+function stopProgress() {
+  const fill = getComputedStyle($("timeline")).getPropertyValue("--progress").trim() || "0%";
+  $("timeline").style.setProperty("--progress", fill);
+  if (progressAnimation) progressAnimation.cancel();
+  progressAnimation = undefined;
+  return fill;
+}
+function fillProgress(target, duration) {
+  const from = stopProgress();
+  const to = `${target}%`;
+  $("timeline").style.setProperty("--progress", to);
+  if (reducedMotion.matches || duration <= 0 || from === to) return;
+  const animation = $("timeline").animate([{ "--progress": from }, { "--progress": to }],
+    { duration, easing: "linear" });
+  progressAnimation = animation;
+  animation.onfinish = () => {
+    if (progressAnimation !== animation) return;
+    animation.cancel();
+    progressAnimation = undefined;
+  };
+}
+function captureInterval() {
+  if (intervalStarted === null) return;
+  elapsedFraction = Math.min(1, intervalFraction + (performance.now() - intervalStarted) / intervalDuration);
+  intervalStarted = null;
+}
 function render(step, animate = false) {
+  stopProgress();
+  elapsedFraction = 0;
+  intervalStarted = null;
   clearMotion();
   const token = revision, old = current;
   const oldCards = [...$("swap-stage").querySelectorAll(".featured-slot > .scorecard")];
@@ -111,7 +145,7 @@ function render(step, animate = false) {
   const theft = thefts[step === 0 ? 0 : step - 1];
   $("timeline").value = String(step);
   $("timeline").setAttribute("aria-valuetext", step === 0 ? "Original scores, no steals applied" : `Steal ${step} of ${thefts.length}`);
-  $("timeline").style.setProperty("--progress", `${thefts.length ? step / thefts.length * 100 : 0}%`);
+  fillProgress(thefts.length ? step / thefts.length * 100 : 0, playing ? 0 : 240);
   $("step-counter").textContent = step === 0 ? "Original scores" : `Steal ${step} of ${thefts.length}`;
   $("previous").disabled = step === 0;
   $("next").disabled = step === thefts.length;
@@ -249,6 +283,10 @@ function pausePlayback() {
   setPlaying(false);
 }
 function setPlaying(value) {
+  if (!value) {
+    captureInterval();
+    if (playing) stopProgress();
+  }
   playing = value;
   clearTimeout(timer);
   const label = value ? "Pause" : current === thefts.length && thefts.length ? "Replay" : "Play";
@@ -260,7 +298,18 @@ function setPlaying(value) {
 }
 function schedule() {
   clearTimeout(timer);
+  captureInterval();
+  intervalDuration = current === thefts.length
+    ? Math.max(FLIP_DURATION, REORDER_DURATION) + SCORE_DURATION + 50
+    : Number($("speed").value);
+  intervalFraction = elapsedFraction;
+  intervalStarted = performance.now();
+  const remaining = intervalDuration * (1 - elapsedFraction);
+  if (current < thefts.length && !reducedMotion.matches) {
+    fillProgress((current + 1) / thefts.length * 100, remaining);
+  }
   timer = setTimeout(() => {
+    intervalStarted = null;
     if (!playing) return;
     if (current === thefts.length) {
       setPlaying(false);
@@ -268,7 +317,7 @@ function schedule() {
     }
     render(current + 1, true);
     schedule();
-  }, current === thefts.length ? Math.max(FLIP_DURATION, REORDER_DURATION) + SCORE_DURATION + 50 : Number($("speed").value));
+  }, remaining);
 }
 function jump(step, animate = false) {
   setPlaying(false);
@@ -281,7 +330,10 @@ $("play").addEventListener("click", () => {
     return;
   }
   const pausedMotion = (pendingMotion && motionPaused) || [...activeAnimations].some(animation => animation.playState === "paused");
-  if (current === thefts.length && !pausedMotion) render(0);
+  if (current === thefts.length && !pausedMotion) {
+    render(0);
+    fillProgress(0, 0);
+  }
   motionPaused = false;
   for (const animation of activeAnimations) animation.play();
   setPlaying(true);
@@ -291,11 +343,18 @@ $("next").addEventListener("click", () => jump(Math.min(thefts.length, current +
 $("timeline").addEventListener("input", event => jump(Number(event.target.value)));
 $("speed").addEventListener("change", () => { if (playing) schedule(); });
 document.addEventListener("visibilitychange", () => { if (document.hidden && playing) pausePlayback(); });
-window.addEventListener("resize", clearMotion);
+window.addEventListener("resize", () => {
+  clearMotion();
+  if (!playing) {
+    stopProgress();
+    fillProgress(thefts.length ? current / thefts.length * 100 : 0, 0);
+  }
+});
 reducedMotion.addEventListener("change", () => {
   if (reducedMotion.matches) {
     clearMotion();
     setPlaying(false);
+    fillProgress(thefts.length ? current / thefts.length * 100 : 0, 0);
   }
 });
 const controls = document.querySelector(".timeline-controls");

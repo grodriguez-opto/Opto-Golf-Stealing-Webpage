@@ -25,6 +25,8 @@ The team score for each hole is the **higher** of the two players' scores. The t
 
 Playback controls stay fixed at the bottom of the viewport, with reserved page space and mobile safe-area padding so they do not obscure the last cards or footer.
 
+During playback, the timeline track fills continuously toward the next step while the slider thumb stays on the selected step. Pause freezes the fill; resuming or changing speed preserves its progress through the interval. Manual stepping and scrubbing ease the fill to the selected step. Reduced motion uses immediate updates instead.
+
 The replay autoplays once, stopping after the final steal. Use play/pause, previous/next, the speed selector, or the timeline slider to inspect any state. Scrubbing pauses playback. Featured cards match the Scores grid's card sizes. When a featured team changes, its old card flips horizontally to the edge-on midpoint before the new card appears. The unchanged team's card stays in place. After the flip and standings movement settle, the score exchange plays in both sections with the same values and timing; the theft is applied only once. Equal-valued scores still swap, with no change to cell values.
 
 Pause freezes active card, standings, and score animations as well as playback; Play resumes them. Scrubbing cancels stale motions before animating to the selected standings. Resizing cancels motion and shows the current state in the new layout. Scrolling does not interrupt the synchronized score exchanges. Reduced-motion preferences disable autoplay and all animation types; manual timeline controls still work. Playback also pauses when the tab is hidden.

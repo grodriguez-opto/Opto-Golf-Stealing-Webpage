@@ -356,6 +356,50 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       await evaluate('document.getElementById("play").click();true');
     });
 
+    await t.test("track fills between steps while thumb stays discrete, with pause and speed continuity", async () => {
+      await scrub(0);
+      await sleep(600);
+      await evaluate('document.getElementById("speed").value="4800";document.getElementById("play").click();true');
+      await sleep(350);
+      const progress = () => evaluate('({fill:parseFloat(getComputedStyle(document.getElementById("timeline")).getPropertyValue("--progress")),value:document.getElementById("timeline").value,count:document.getElementById("timeline").getAnimations().length})');
+      const early = await progress();
+      await sleep(350);
+      const later = await progress();
+      assert.equal(early.value, "0");
+      assert.equal(later.value, "0");
+      assert.ok(early.fill > 0 && later.fill > early.fill && later.fill < 100 / thefts.length);
+      await evaluate("window.scrollTo(0,0);true");
+      await screenshot("turkey-putt-timeline.png");
+      await evaluate('document.getElementById("play").click();true');
+      const paused = await progress();
+      await sleep(180);
+      assert.ok(Math.abs((await progress()).fill - paused.fill) < .001);
+      await evaluate('document.getElementById("speed").value="1900";document.getElementById("play").click();true');
+      await frames();
+      const resumed = await progress();
+      assert.ok(resumed.fill >= paused.fill && resumed.fill < paused.fill + 1);
+      await evaluate('document.getElementById("speed").value="3000";document.getElementById("speed").dispatchEvent(new Event("change"));true');
+      const changed = await progress();
+      assert.ok(Math.abs(changed.fill - resumed.fill) < .2);
+      assert.equal(changed.count, 1);
+      await evaluate('document.getElementById("play").click();true');
+      await scrub(5);
+      await sleep(80);
+      const manual = await progress();
+      assert.equal(manual.value, "5");
+      assert.ok(manual.fill > changed.fill && manual.fill < 500 / thefts.length);
+      await scrub(2);
+      await scrub(7);
+      await scrub(1);
+      await sleep(300);
+      const settled = await progress();
+      assert.ok(Math.abs(settled.fill - 100 / thefts.length) < .001);
+      assert.equal(settled.value, "1");
+      assert.equal(settled.count, 0);
+      await evaluate("window.scrollTo(0,0);true");
+      await verifyState(1);
+    });
+
     await t.test("reduced motion cancels active animation and disables new motion", async () => {
       await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
       await frames();
