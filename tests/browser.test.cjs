@@ -17,7 +17,7 @@ const thefts = engine.parseThefts(fs.readFileSync(path.join(root, "data", "theft
 const states = engine.snapshots(teams, thefts);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PATH to a Chromium browser", timeout: 60000 }, async t => {
+test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PATH to a Chromium browser", timeout: 90000 }, async t => {
   const server = http.createServer((request, response) => {
     const relative = decodeURIComponent(new URL(request.url, "http://localhost").pathname)
       .replace(/^\/Opto-Golf-Stealing-Webpage\//, "");
@@ -79,6 +79,13 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       return result.result.value;
     };
     const frames = () => evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))");
+    const waitFor = async expression => {
+      for (let i = 0; i < 200; i++) {
+        if (await evaluate(expression)) return;
+        await sleep(25);
+      }
+      assert.fail(`Timed out waiting for ${expression}`);
+    };
     const scrub = step => evaluate(`document.getElementById("timeline").value="${step}";document.getElementById("timeline").dispatchEvent(new Event("input",{bubbles:true}));true`);
     const viewport = async (width, height = 1200) => {
       await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 701 });
@@ -92,9 +99,12 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
     };
     const verifyState = async step => {
       const actual = await evaluate(`[...document.querySelectorAll("#scorecards > article")].map(card=>({id:card.dataset.teamId,scores:[...card.querySelectorAll("[data-cell]")].map(cell=>Number(cell.textContent)),total:Number(card.querySelector(".total-number strong").textContent)}))`);
-      assert.deepEqual(actual, engine.standings(states[step]).map(team => ({
+      assert.deepEqual(actual.toSorted((a,b)=>Number(a.id)-Number(b.id)), states[step].map(team => ({
         id: team.id, scores: team.players.flatMap(player => player.scores), total: engine.teamScore(team).total
-      })));
+      })).toSorted((a,b)=>Number(a.id)-Number(b.id)));
+      if (!await evaluate("deferredOrder")) {
+        assert.deepEqual(actual.map(team=>team.id), engine.standings(states[step]).map(team=>team.id));
+      }
     };
     const flightValues = step => {
       const event = thefts[step - 1];
@@ -155,7 +165,8 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       await scrub(1);
       await sleep(600);
       await evaluate('document.getElementById("next").click();true');
-      await frames();
+      await waitFor('phase === "cards"');
+      await evaluate("pausePlayback();true");
       const sample = async time => evaluate(`(()=>{
         const slot=document.querySelector(".is-flipping");
         const incoming=slot.querySelector(".flip-incoming"),outgoing=slot.querySelector(".departing-card");
@@ -189,7 +200,8 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       await scrub(step - 1);
       await sleep(600);
       await evaluate('window.oldGridPositions=Object.fromEntries([...document.querySelectorAll("#scorecards > article")].map(n=>[n.dataset.teamId,{x:n.getBoundingClientRect().x,y:n.getBoundingClientRect().y}]));document.getElementById("next").click();true');
-      await frames();
+      await waitFor('phase === "ranks"');
+      await evaluate("pausePlayback();true");
       const moving = await evaluate(`(()=>{
         const cards=[...document.querySelectorAll("#scorecards > article")];
         return cards.filter(n=>n.getAnimations().length).map(n=>{
@@ -251,20 +263,20 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       await evaluate("document.activeElement.blur();window.scrollTo(0,0);true");
     });
 
-    await t.test("flips and grid movement precede four synchronized score flights", async () => {
+    await t.test("score flights precede the dwell, standings movement and next pair flip", async () => {
       await viewport(1440, 1500);
       await scrub(1);
       await sleep(600);
       await evaluate('document.getElementById("next").click();true');
       await frames();
-      const timing = await evaluate(`({flights:[...document.querySelectorAll(".flying-score")].map(node=>{const a=node.getAnimations()[0];return {section:node.dataset.section,value:node.textContent,start:a.startTime,duration:a.effect.getTiming().duration};}),departing:document.querySelectorAll(".departing-card").length,flipStart:document.querySelector(".departing-card").getAnimations()[0].startTime})`);
-      assert.equal(timing.departing, 1);
+      const timing = await evaluate(`({flights:[...document.querySelectorAll(".flying-score")].map(node=>{const a=node.getAnimations()[0];return {section:node.dataset.section,value:node.textContent,start:a.startTime,duration:a.effect.getTiming().duration};}),departing:document.querySelectorAll(".departing-card").length,moving:document.querySelectorAll("#scorecards > article").length && [...document.querySelectorAll("#scorecards > article")].some(n=>n.getAnimations().length)})`);
+      assert.equal(timing.departing, 0);
       assert.deepEqual(timing.flights.map(f => f.section), ["swap-stage", "swap-stage", "scorecards", "scorecards"]);
       assert.deepEqual(timing.flights.map(f => f.value), flightValues(2));
       assert.equal(new Set(timing.flights.map(f => f.start)).size, 1);
+      assert.equal(timing.moving, false);
       timing.flights.forEach(f => {
         assert.equal(f.duration, 1250);
-        assert.ok(Math.abs(f.start - timing.flipStart - 500) < .001);
       });
       await verifyState(2);
       await sleep(700);
@@ -272,11 +284,70 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       await frames();
       await screenshot("turkey-putt-score-swap.png");
       await evaluate("window.scrollTo(0,0);true");
-      await sleep(1000);
+      await waitFor('phase === "dwell"');
+      assert.equal(await evaluate('document.querySelectorAll(".flying-score").length'), 0);
+      await waitFor('phase === "cards"');
+      await waitFor('phase === "ready"');
       assert.equal(await evaluate('document.getAnimations().length'), 0);
       await screenshot("turkey-putt-desktop.png");
       await viewport(390, 1700);
       await screenshot("turkey-putt-mobile.png");
+    });
+
+    await t.test("autoplay runs scores, fixed dwell, ranks, then cards before the next scores", async () => {
+      await viewport(1440);
+      await scrub(0);
+      await evaluate(`document.getElementById("speed").value="1900";
+        document.getElementById("next").click();document.getElementById("play").click();
+        window.sequence=[];window.sequenceTimer=setInterval(()=>{
+          const sample={phase,current,time:performance.now(),flights:document.querySelectorAll(".flying-score").length,
+            flips:document.querySelectorAll(".departing-card").length};
+          if(!window.sequence.length || sample.phase!==window.sequence.at(-1).phase || sample.current!==window.sequence.at(-1).current)
+            window.sequence.push(sample);
+        },10);true`);
+      await waitFor('phase === "dwell"');
+      assert.equal(await evaluate('document.querySelectorAll(".departing-card,.flying-score").length'), 0);
+      await screenshot("turkey-putt-dwell.png");
+      await sleep(250);
+      await evaluate('document.getElementById("play").click();true');
+      const paused = await evaluate("({current,elapsedFraction})");
+      await sleep(250);
+      assert.deepEqual(await evaluate("({current,elapsedFraction})"), paused);
+      await evaluate('document.getElementById("speed").value="4800";document.getElementById("speed").dispatchEvent(new Event("change"));document.getElementById("play").click();true');
+      assert.equal(await evaluate("phaseDuration()"), 1500);
+      await sleep(1000);
+      await verifyState(1);
+      await waitFor("window.sequence.at(-1)?.current === 2");
+      const sequence = await evaluate("clearInterval(window.sequenceTimer);window.sequence");
+      const cards = sequence.find(sample => sample.phase === "cards");
+      const dwell = sequence.find(sample => sample.phase === "dwell");
+      const ranks = sequence.find(sample => sample.phase === "ranks");
+      const next = sequence.find(sample => sample.current === 2);
+      assert.ok(cards && dwell && next, JSON.stringify(sequence));
+      assert.equal(cards.flights, 0);
+      assert.ok(cards.flips > 0);
+      assert.ok(ranks.time - dwell.time >= 1720, JSON.stringify(sequence));
+      assert.ok(cards.time >= ranks.time + 470, JSON.stringify(sequence));
+      assert.ok(next.time >= cards.time + 470, JSON.stringify(sequence));
+      assert.deepEqual(sequence.slice(0,5).map(sample=>sample.phase), ["scores","dwell","ranks","cards","scores"]);
+      await scrub(2);
+    });
+
+    await t.test("unchanged featured teams skip the flip but retain the full dwell", async () => {
+      const index = thefts.findIndex((event, i) => i + 1 < thefts.length &&
+        event.stealer.teamId === thefts[i + 1].stealer.teamId && event.victim.teamId === thefts[i + 1].victim.teamId);
+      if (index < 0) return;
+      await scrub(index);
+      await evaluate('document.getElementById("speed").value="1900";document.getElementById("next").click();document.getElementById("play").click();true');
+      await waitFor('phase === "dwell"');
+      const start = Date.now();
+      assert.equal(await evaluate('document.querySelectorAll(".departing-card,.flying-score").length'), 0);
+      await sleep(1250);
+      await verifyState(index + 1);
+      await waitFor(`current === ${index + 2}`);
+      assert.ok(Date.now() - start >= 1470);
+      await scrub(index + 2);
+      await evaluate('document.getElementById("speed").value="4800";true');
     });
 
     await t.test("pause freezes motions and play resumes without changing scores", async () => {
@@ -296,6 +367,26 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       assert.equal(await evaluate('new Set([...document.querySelectorAll(".flying-score")].map(node=>node.getAnimations()[0].startTime)).size'), 1);
       await verifyState(2);
       await scrub(2);
+    });
+
+    await t.test("speed changes and pause preserve a flip, while scrubbing cancels the entire sequence", async () => {
+      await scrub(1);
+      await evaluate('document.getElementById("speed").value="1900";document.getElementById("next").click();true');
+      await waitFor('phase === "cards"');
+      await evaluate('pausePlayback();true');
+      await frames();
+      const time = await evaluate('[...activeAnimations].map(a=>a.currentTime)');
+      await sleep(100);
+      assert.deepEqual(await evaluate('[...activeAnimations].map(a=>a.currentTime)'), time);
+      await evaluate('document.getElementById("speed").value="4800";document.getElementById("speed").dispatchEvent(new Event("change"));true');
+      assert.equal(await evaluate('[...activeAnimations].every(a=>a.playState==="paused" && a.effect.getTiming().duration===500)'), true);
+      await evaluate('document.getElementById("play").click();true');
+      await waitFor('current === 3');
+      await scrub(0);
+      await sleep(2200);
+      await verifyState(0);
+      assert.equal(await evaluate('document.querySelectorAll(".flying-score,.departing-card").length'), 0);
+      assert.equal(await evaluate('document.getElementById("event-title").textContent'), "Original scores");
     });
 
     await t.test("rapid next and scrub cancel stale transitions and preserve every state", async () => {
@@ -347,7 +438,7 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       }
       await scrub(thefts.length - 1);
       await evaluate('document.getElementById("speed").value="1900";document.getElementById("play").click();true');
-      await sleep(4000);
+      await waitFor('document.getElementById("play-state").textContent === "COMPLETE"');
       await verifyState(thefts.length);
       assert.equal(await evaluate('document.getElementById("play-state").textContent'), "COMPLETE");
       assert.equal(await evaluate('document.getAnimations().length'), 0);

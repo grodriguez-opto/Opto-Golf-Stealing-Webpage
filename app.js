@@ -11,11 +11,26 @@ let intervalStarted = null;
 let intervalFraction = 0;
 let intervalDuration = 0;
 let elapsedFraction = 0;
+// Only ready can advance the selected step; all other phases finish that step.
+let phase = "ready";
+let featuredTheft;
+let deferredOrder = false;
 const activeAnimations = new Set();
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const FLIP_DURATION = 500;
 const REORDER_DURATION = 500;
 const SCORE_DURATION = 1250;
+const DWELL_DURATION = 1500;
+
+function motionScale() {
+  return Number($("speed").value) / 4800;
+}
+function phaseDuration() {
+  if (phase === "scores") return SCORE_DURATION * motionScale();
+  if (phase === "ranks") return REORDER_DURATION * motionScale();
+  if (phase === "cards") return FLIP_DURATION * motionScale();
+  return DWELL_DURATION;
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -86,6 +101,7 @@ function card(team, rank, options = {}) {
   return article;
 }
 function clearMotion() {
+  clearTimeout(timer);
   revision++;
   motionPaused = false;
   pendingMotion = false;
@@ -97,6 +113,7 @@ function clearMotion() {
 }
 function motion(node, frames, options, startTime, finish = () => {}) {
   const animation = node.animate(frames, options);
+  animation.baseDuration = options.duration / motionScale();
   animation.startTime = startTime;
   activeAnimations.add(animation);
   animation.onfinish = () => {
@@ -138,11 +155,13 @@ function render(step, animate = false) {
   intervalStarted = null;
   clearMotion();
   const token = revision, old = current;
-  const oldCards = [...$("swap-stage").querySelectorAll(".featured-slot > .scorecard")];
+  const oldOrder = [...$("scorecards").children].map(node => node.dataset.teamId);
   const oldPositions = new Map([...$("scorecards").children].map(node => [node.dataset.teamId, node.getBoundingClientRect()]));
   current = step;
   const state = states[step], rank = engine.ranks(state);
   const theft = thefts[step === 0 ? 0 : step - 1];
+  const exchange = animate && step === old + 1 && !reducedMotion.matches;
+  deferredOrder = exchange;
   $("timeline").value = String(step);
   $("timeline").setAttribute("aria-valuetext", step === 0 ? "Original scores, no steals applied" : `Steal ${step} of ${thefts.length}`);
   fillProgress(thefts.length ? step / thefts.length * 100 : 0, playing ? 0 : 240);
@@ -160,21 +179,62 @@ function render(step, animate = false) {
     const role = step && theft ? team.id === theft.stealer.teamId ? "stealing" : team.id === theft.victim.teamId ? "stolen" : "" : "";
     return card(team, rank[team.id], { role, cell: role === "stealing" ? theft.stealer : role === "stolen" ? theft.victim : null });
   }));
+  if (exchange) {
+    const cards = new Map([...$("scorecards").children].map(node => [node.dataset.teamId, node]));
+    $("scorecards").append(...oldOrder.map(id => cards.get(id)));
+  }
   const stage = $("swap-stage");
-  stage.replaceChildren();
   if (!theft) {
     $("event-title").textContent = "Original scores";
     $("event-description").textContent = "No steals in the log.";
-    stage.append(el("p", "empty-stage", "Add rows to the theft log to show swaps."));
+    stage.replaceChildren(el("p", "empty-stage", "Add rows to the theft log to show swaps."));
     return;
   }
+  showFeatured(theft, state, step, false);
+  phase = exchange ? "scores" : "ready";
+  if (!reducedMotion.matches) {
+    pendingMotion = true;
+    requestAnimationFrame(() => {
+      if (token !== revision) return;
+      pendingMotion = false;
+      const start = document.timeline.currentTime;
+      const movements = [...$("scorecards").children].flatMap(node => {
+        const from = oldPositions.get(node.dataset.teamId);
+        const to = node.getBoundingClientRect();
+        if (!from) return [];
+        const x = from.left - to.left, y = from.top - to.top;
+        return Math.abs(x) > .5 || Math.abs(y) > .5 ? [{ node, x, y }] : [];
+      });
+      if (exchange) {
+        animateSwap(theft, states[step - 1], start);
+      }
+      if (!exchange) movements.forEach(({ node, x, y }) => {
+        motion(node, [{ transform: `translate(${x}px, ${y}px)` }, { transform: "translate(0, 0)" }],
+          { duration: REORDER_DURATION * motionScale(), easing: "cubic-bezier(.2,.7,.25,1)", fill: "backwards" }, start);
+      });
+      if (motionPaused) {
+        for (const animation of activeAnimations) animation.pause();
+      } else {
+        schedule();
+      }
+    });
+  } else {
+    schedule();
+  }
+}
+function showFeatured(theft, state, step, flip, describe = true) {
+  const stage = $("swap-stage");
+  const oldCards = [...stage.querySelectorAll(".featured-slot > .scorecard:not(.departing-card)")];
+  stage.replaceChildren();
+  featuredTheft = theft;
+  const rank = engine.ranks(state);
   const a = state.find(team => team.id === theft.stealer.teamId), b = state.find(team => team.id === theft.victim.teamId);
   const previous = states[Math.max(0, step - 1)];
   const playerA = a.players[theft.stealer.player].name, playerB = b.players[theft.victim.player].name;
-  if (step === 0) {
+  if (describe && step === 0) {
     $("event-title").textContent = "Original scores";
     $("event-description").replaceChildren("First steal: ", teamLabel(a), " swap with ", teamLabel(b), ".");
-  } else {
+  } else if (describe) {
     $("event-title").replaceChildren(teamLabel(a), " steal from ", teamLabel(b));
     $("event-description").textContent = `${playerA}, hole ${theft.stealer.hole + 1} (${engine.getCell(previous, theft.stealer)}) ↔ ${playerB}, hole ${theft.victim.hole + 1} (${engine.getCell(previous, theft.victim)}). ${playerA} receives ${engine.getCell(state, theft.stealer)}; ${playerB} receives ${engine.getCell(state, theft.victim)}.`;
   }
@@ -188,7 +248,7 @@ function render(step, animate = false) {
     const slot = el("div", "featured-slot");
     slot.append(incoming);
     const outgoing = oldCards[index];
-    if (outgoing && outgoing.dataset.teamId !== incoming.dataset.teamId && !reducedMotion.matches) {
+    if (flip && outgoing && outgoing.dataset.teamId !== incoming.dataset.teamId && !reducedMotion.matches) {
       outgoing.classList.add("departing-card");
       outgoing.setAttribute("aria-hidden", "true");
       outgoing.inert = true;
@@ -200,34 +260,37 @@ function render(step, animate = false) {
     }
     stage.append(slot);
   });
-  if (!reducedMotion.matches) {
-    pendingMotion = true;
-    requestAnimationFrame(() => {
-      if (token !== revision) return;
-      pendingMotion = false;
-      const start = document.timeline.currentTime;
-      // Measure final cell routes before flip and grid transforms are applied.
-      const movements = [...$("scorecards").children].flatMap(node => {
-        const from = oldPositions.get(node.dataset.teamId);
-        const to = node.getBoundingClientRect();
-        if (!from) return [];
-        const x = from.left - to.left, y = from.top - to.top;
-        return Math.abs(x) > .5 || Math.abs(y) > .5 ? [{ node, x, y }] : [];
-      });
-      const settleTime = Math.max(flips.length ? FLIP_DURATION : 0, movements.length ? REORDER_DURATION : 0);
-      if (animate && step === old + 1) {
-        animateSwap(theft, previous, start + settleTime);
-      }
-      animateFlips(flips, start);
-      movements.forEach(({ node, x, y }) => {
-        motion(node, [{ transform: `translate(${x}px, ${y}px)` }, { transform: "translate(0, 0)" }],
-          { duration: REORDER_DURATION, easing: "cubic-bezier(.2,.7,.25,1)", fill: "backwards" }, start);
-      });
-      if (motionPaused) {
-        for (const animation of activeAnimations) animation.pause();
-      }
-    });
+  animateFlips(flips, document.timeline.currentTime);
+  return flips.length > 0;
+}
+function prepareNext() {
+  if (current >= thefts.length || featuredTheft === thefts[current]) return false;
+  const theft = thefts[current], state = states[current];
+  const changed = showFeatured(theft, state, 0, true, false);
+  const a = state.find(team => team.id === theft.stealer.teamId);
+  const b = state.find(team => team.id === theft.victim.teamId);
+  $("event-title").replaceChildren("Next steal: ", teamLabel(a), " from ", teamLabel(b));
+  $("event-description").textContent = `${a.players[theft.stealer.player].name}, hole ${theft.stealer.hole + 1} (${engine.getCell(state, theft.stealer)}) ↔ ${b.players[theft.victim.player].name}, hole ${theft.victim.hole + 1} (${engine.getCell(state, theft.victim)}).`;
+  return changed;
+}
+function reorderCards(animate = true) {
+  if (!states.length) return;
+  const grid = $("scorecards");
+  const cards = new Map([...grid.children].map(node => [node.dataset.teamId, node]));
+  const positions = new Map([...grid.children].map(node => [node.dataset.teamId, node.getBoundingClientRect()]));
+  grid.append(...engine.standings(states[current]).map(team => cards.get(team.id)));
+  deferredOrder = false;
+  const start = document.timeline.currentTime;
+  let moved = false;
+  if (animate && !reducedMotion.matches) for (const node of grid.children) {
+    const before = positions.get(node.dataset.teamId), after = node.getBoundingClientRect();
+    const x = before.left - after.left, y = before.top - after.top;
+    if (Math.abs(x) < .5 && Math.abs(y) < .5) continue;
+    moved = true;
+    motion(node, [{ transform: `translate(${x}px, ${y}px)` }, { transform: "translate(0, 0)" }],
+      { duration: REORDER_DURATION * motionScale(), easing: "cubic-bezier(.2,.7,.25,1)", fill: "backwards" }, start);
   }
+  return moved;
 }
 function animateFlips(flips, startTime) {
   flips.forEach(({ slot, incoming, outgoing }) => {
@@ -236,13 +299,13 @@ function animateFlips(flips, startTime) {
       { transform: "rotateY(90deg)", visibility: "visible", offset: .499999 },
       { transform: "rotateY(90deg)", visibility: "hidden", offset: .5 },
       { transform: "rotateY(90deg)", visibility: "hidden" }
-    ], { duration: FLIP_DURATION, fill: "both" }, startTime, () => outgoing.remove());
+    ], { duration: FLIP_DURATION * motionScale(), fill: "both" }, startTime, () => outgoing.remove());
     motion(incoming, [
       { transform: "rotateY(-90deg)", visibility: "hidden" },
       { transform: "rotateY(-90deg)", visibility: "hidden", offset: .5 },
       { transform: "rotateY(-90deg)", visibility: "visible", offset: .500001, easing: "ease-out" },
       { transform: "rotateY(0deg)", visibility: "visible" }
-    ], { duration: FLIP_DURATION, fill: "both" }, startTime, () => {
+    ], { duration: FLIP_DURATION * motionScale(), fill: "both" }, startTime, () => {
       incoming.classList.remove("flip-incoming");
       slot.classList.remove("is-flipping");
     });
@@ -269,11 +332,11 @@ function animateSwap(theft, before, startTime) {
         { transform: `translate(${x / 2}px, ${y / 2 + (index ? 60 : -60)}px) scale(1.2)`, opacity: 1, offset: .5 },
         { transform: `translate(${x}px, ${y}px) scale(1)`, opacity: 1, offset: .9 },
         { transform: `translate(${x}px, ${y}px) scale(.8)`, opacity: 0 }
-      ], { duration: SCORE_DURATION, easing: "ease-in-out", fill: "both" }, startTime, () => chip.remove());
+      ], { duration: SCORE_DURATION * motionScale(), easing: "ease-in-out", fill: "both" }, startTime, () => chip.remove());
     });
     [a, b].forEach(cell => {
       motion(cell, [{ opacity: 0 }, { opacity: 0, offset: .9 }, { opacity: 1 }],
-        { duration: SCORE_DURATION, fill: "backwards" }, startTime);
+        { duration: SCORE_DURATION * motionScale(), fill: "backwards" }, startTime);
     });
   });
 }
@@ -289,40 +352,69 @@ function setPlaying(value) {
   }
   playing = value;
   clearTimeout(timer);
-  const label = value ? "Pause" : current === thefts.length && thefts.length ? "Replay" : "Play";
+  const complete = current === thefts.length && thefts.length && phase === "ready";
+  const label = value ? "Pause" : complete ? "Replay" : "Play";
   $("play").replaceChildren(document.createTextNode(value ? "Ⅱ " : "▶ "), el("span", "", label));
   $("play").setAttribute("aria-label", label);
-  $("play-state").textContent = value ? "PLAYING" : current === thefts.length && !activeAnimations.size ? "COMPLETE" : "PAUSED";
+  $("play-state").textContent = value ? "PLAYING" : complete ? "COMPLETE" : "PAUSED";
   $("play-state").classList.toggle("is-playing", value);
   if (value) schedule();
 }
 function schedule() {
   clearTimeout(timer);
   captureInterval();
-  intervalDuration = current === thefts.length
-    ? Math.max(FLIP_DURATION, REORDER_DURATION) + SCORE_DURATION + 50
-    : Number($("speed").value);
+  if (motionPaused || pendingMotion || (!playing && phase === "ready")) return;
+  intervalDuration = phaseDuration();
   intervalFraction = elapsedFraction;
   intervalStarted = performance.now();
   const remaining = intervalDuration * (1 - elapsedFraction);
-  if (current < thefts.length && !reducedMotion.matches) {
-    fillProgress((current + 1) / thefts.length * 100, remaining);
+  if (playing && current < thefts.length && !reducedMotion.matches) {
+    const next = thefts[current];
+    const needsFlip = featuredTheft &&
+      (featuredTheft.stealer.teamId !== next.stealer.teamId || featuredTheft.victim.teamId !== next.victim.teamId);
+    const ranks = deferredOrder ? REORDER_DURATION * motionScale() : 0;
+    const flip = needsFlip ? FLIP_DURATION * motionScale() : 0;
+    const after = phase === "scores" ? DWELL_DURATION + ranks + flip
+      : phase === "dwell" ? ranks + flip : phase === "ranks" ? flip : 0;
+    fillProgress((current + 1) / thefts.length * 100, remaining + after);
   }
   timer = setTimeout(() => {
     intervalStarted = null;
-    if (!playing) return;
-    if (current === thefts.length) {
-      setPlaying(false);
+    elapsedFraction = 0;
+    if (phase !== "ready") {
+      // Finish effects before replacing their target nodes, including a throttled frame.
+      for (const animation of [...activeAnimations]) animation.onfinish();
+      if (phase === "scores") phase = "dwell";
+      else if (phase === "dwell") {
+        reorderCards();
+        phase = "ranks";
+      } else if (phase === "ranks") {
+        phase = prepareNext() ? "cards" : "ready";
+      } else phase = "ready";
+      if (phase === "ready") {
+        advance();
+        return;
+      }
+      schedule();
       return;
     }
-    render(current + 1, true);
-    schedule();
+    advance();
   }, remaining);
+}
+function advance() {
+  if (!playing) {
+    setPlaying(false);
+    return;
+  }
+  if (current === thefts.length) {
+    setPlaying(false);
+    return;
+  }
+  render(current + 1, true);
 }
 function jump(step, animate = false) {
   setPlaying(false);
   render(step, animate);
-  setPlaying(false);
 }
 $("play").addEventListener("click", () => {
   if (playing) {
@@ -330,7 +422,7 @@ $("play").addEventListener("click", () => {
     return;
   }
   const pausedMotion = (pendingMotion && motionPaused) || [...activeAnimations].some(animation => animation.playState === "paused");
-  if (current === thefts.length && !pausedMotion) {
+  if (current === thefts.length && phase === "ready" && !pausedMotion) {
     render(0);
     fillProgress(0, 0);
   }
@@ -341,10 +433,29 @@ $("play").addEventListener("click", () => {
 $("previous").addEventListener("click", () => jump(Math.max(0, current - 1)));
 $("next").addEventListener("click", () => jump(Math.min(thefts.length, current + 1), true));
 $("timeline").addEventListener("input", event => jump(Number(event.target.value)));
-$("speed").addEventListener("change", () => { if (playing) schedule(); });
+$("speed").addEventListener("change", () => {
+  captureInterval();
+  for (const animation of activeAnimations) {
+    const timing = animation.effect.getTiming();
+    const fraction = animation.currentTime / timing.duration;
+    const duration = animation.baseDuration * motionScale();
+    animation.effect.updateTiming({ duration });
+    animation.currentTime = fraction * duration;
+  }
+  schedule();
+});
 document.addEventListener("visibilitychange", () => { if (document.hidden && playing) pausePlayback(); });
 window.addEventListener("resize", () => {
+  captureInterval();
   clearMotion();
+  reorderCards(false);
+  phase = "ready";
+  elapsedFraction = 0;
+  if (playing) {
+    prepareNext();
+    clearMotion();
+    schedule();
+  }
   if (!playing) {
     stopProgress();
     fillProgress(thefts.length ? current / thefts.length * 100 : 0, 0);
@@ -353,6 +464,8 @@ window.addEventListener("resize", () => {
 reducedMotion.addEventListener("change", () => {
   if (reducedMotion.matches) {
     clearMotion();
+    reorderCards(false);
+    phase = "ready";
     setPlaying(false);
     fillProgress(thefts.length ? current / thefts.length * 100 : 0, 0);
   }
