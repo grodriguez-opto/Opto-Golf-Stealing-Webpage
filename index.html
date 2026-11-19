@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#204d3c">
+  <meta name="description" content="Replay every mini golf score swap, one steal at a time.">
+  <title>Turkey Putt — The scorecard shuffle</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./engine.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header class="site-header wrap">
+    <a class="brand" href="./"><span class="brand-icon" aria-hidden="true">⚑</span> TURKEY PUTT<span class="brand-year"> / THE STEAL EDITION</span></a>
+    <span class="header-note"><i></i> A friendly game. Mostly.</span>
+  </header>
+  <main class="wrap">
+    <section class="hero" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">NINE HOLES. TWO PLAYERS. NO SAFE SCORES.</p>
+        <h1 id="page-title">A little golf.<br>A lot of <em>stealing.</em></h1>
+        <p class="hero-copy">The round is over. The scores aren't.<br>Replay the swaps and watch the leaderboard change.</p>
+      </div>
+      <aside class="round-summary" aria-label="Round overview">
+        <div class="summary-top"><span class="eyebrow">THE ROUND, REMIXED</span><span aria-hidden="true">↗</span></div>
+        <div class="round-numbers"><div><strong id="team-count">—</strong><span>teams</span></div><div><strong>9</strong><span>holes</span></div><div><strong id="steal-count">—</strong><span>steals</span></div></div>
+        <div class="leader-line"><span>Currently in the lead</span><strong id="leader">Loading the green…</strong></div>
+        <p>Highest player score per hole counts.<br>Lowest team total takes the lead.</p>
+      </aside>
+    </section>
+    <section class="replay-panel" aria-labelledby="replay-title">
+      <div class="section-heading"><div><p class="eyebrow">FOLLOW THE FIVE-FINGER DISCOUNTS</p><h2 id="replay-title">The steal replay<span class="live-badge" id="play-state">LOADING</span></h2></div><span class="step-counter" id="step-counter">Original scorecards</span></div>
+      <div id="error" class="error" role="alert" hidden></div>
+      <div class="timeline-controls">
+        <button id="play" class="play-button" disabled aria-label="Play replay">▶ <span>Play replay</span></button>
+        <button id="previous" class="icon-button" disabled aria-label="Previous step">←</button>
+        <div class="timeline">
+          <label class="sr-only" for="timeline">Number of steals applied</label>
+          <input id="timeline" type="range" min="0" max="0" value="0" step="1" disabled>
+          <div class="timeline-labels"><span>Original round</span><span id="timeline-end">Final scores</span></div>
+        </div>
+        <button id="next" class="icon-button" disabled aria-label="Next step">→</button>
+        <label class="speed-label" for="speed">Speed <select id="speed"><option value="4800">1×</option><option value="3000">1.5×</option><option value="1900">2×</option></select></label>
+      </div>
+      <div class="event-caption" aria-live="polite" aria-atomic="true"><span class="event-icon" aria-hidden="true">⇄</span><div><h3 id="event-title">Getting the scorecards ready…</h3><p id="event-description">Every steal is a two-way swap. Follow both scores as they trade places.</p></div></div>
+      <div id="swap-stage" class="swap-stage" aria-label="Scorecards involved in this steal"></div>
+      <div class="stage-footer"><span><i class="legend-dot stealing"></i> Stealing team</span><span><i class="legend-dot stolen"></i> Swapping partner</span><span class="stage-hint">Two scores move. The whole game changes.</span></div>
+    </section>
+    <section class="all-scores" aria-labelledby="scores-title">
+      <div class="section-heading"><div><p class="eyebrow">THE BIG PICTURE</p><h2 id="scores-title">Every team. Every stroke.</h2></div><span class="score-note">Team score = higher score on each hole</span></div>
+      <div id="scorecards" class="scorecard-grid" aria-busy="true"></div>
+    </section>
+    <details class="rules"><summary>How the score shuffle works <span aria-hidden="true">+</span></summary><p>Each team has two players and nine holes. On each hole, the higher of the two player scores is the team score; those nine scores make the team total. A steal exchanges two individual scores — it never copies or deletes one. Swaps happen in log order, so a score can move more than once. Lower totals rank first; tied totals share a rank.</p><p>Player 1 is the first player listed for that team in the scorecards CSV; Player 2 is the second. Use the timeline to return to any point in the round.</p></details>
+  </main>
+  <footer class="wrap site-footer"><span class="brand">TURKEY PUTT <span aria-hidden="true">⚑</span></span><span>A little competitive spirit. A lot of creative accounting.</span><a href="./data/scorecards.csv">Scorecards CSV ↗</a><a href="./data/thefts.csv">Theft log CSV ↗</a></footer>
+</body>
+</html>
