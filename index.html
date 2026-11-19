@@ -33,7 +33,7 @@
       <div class="stage-footer"><span><i class="legend-dot stealing"></i> Stealing team</span><span><i class="legend-dot stolen"></i> Stolen from</span></div>
     </section>
     <section class="all-scores" aria-labelledby="scores-title">
-      <div class="section-heading"><h2 id="scores-title">Scores</h2><span class="score-note">Lowest total first · Higher player score counts on each hole</span></div>
+      <div class="section-heading"><h2 id="scores-title">Scores</h2><div class="score-tools"><label for="track-team">Track Team</label><select id="track-team" disabled aria-describedby="track-team-help"><option value="">None</option></select><span id="track-team-help" class="sr-only">Adds a yellow outline to the selected team's cards.</span></div><span class="score-note">Lowest total first · Higher player score counts on each hole</span></div>
       <div id="scorecards" class="scorecard-grid" aria-busy="true"></div>
     </section>
     <details class="rules"><summary>Scoring rules <span aria-hidden="true">+</span></summary><p>Each team has two players. The higher player score on each hole counts toward the team total. Lower totals rank first; tied totals share a rank. Tied teams keep their original team order.</p><p>Each steal swaps two scores. Swaps happen in log order. Player 1 is the first player listed for that team in the CSV; player 2 is the second.</p></details>

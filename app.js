@@ -15,6 +15,7 @@ let elapsedFraction = 0;
 let phase = "ready";
 let featuredTheft;
 let deferredOrder = false;
+let trackedTeamId = "";
 const activeAnimations = new Set();
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const FLIP_DURATION = 500;
@@ -55,6 +56,7 @@ function card(team, rank, options = {}) {
   const score = engine.teamScore(team);
   const article = el("article", `scorecard ${options.role || ""}`);
   article.dataset.teamId = team.id;
+  if (options.trackedTeamId === team.id) article.classList.add("tracked-team");
   article.setAttribute("aria-label", `${accessibleTeamName(team)}, total ${score.total}, rank ${rank}`);
   const head = el("div", "card-heading"), identity = el("div", "team-identity");
   const heading = el("h3");
@@ -177,7 +179,7 @@ function render(step, animate = false) {
   $("leader").append(document.createTextNode(` · ${engine.teamScore(leaders[0]).total} strokes`));
   $("scorecards").replaceChildren(...engine.standings(state).map(team => {
     const role = step && theft ? team.id === theft.stealer.teamId ? "stealing" : team.id === theft.victim.teamId ? "stolen" : "" : "";
-    return card(team, rank[team.id], { role, cell: role === "stealing" ? theft.stealer : role === "stolen" ? theft.victim : null });
+    return card(team, rank[team.id], { role, cell: role === "stealing" ? theft.stealer : role === "stolen" ? theft.victim : null, trackedTeamId });
   }));
   if (exchange) {
     const cards = new Map([...$("scorecards").children].map(node => [node.dataset.teamId, node]));
@@ -243,8 +245,8 @@ function showFeatured(theft, state, step, flip, describe = true) {
     b: engine.teamScore(previous.find(team => team.id === b.id)).total
   } : {};
   const flips = [];
-  [card(a, rank[a.id], { role: "stealing", cell: theft.stealer, before: before.a }),
-    card(b, rank[b.id], { role: "stolen", cell: theft.victim, before: before.b })].forEach((incoming, index) => {
+  [card(a, rank[a.id], { role: "stealing", cell: theft.stealer, before: before.a, trackedTeamId }),
+    card(b, rank[b.id], { role: "stolen", cell: theft.victim, before: before.b, trackedTeamId })].forEach((incoming, index) => {
     const slot = el("div", "featured-slot");
     slot.append(incoming);
     const outgoing = oldCards[index];
@@ -291,6 +293,23 @@ function reorderCards(animate = true) {
       { duration: REORDER_DURATION * motionScale(), easing: "cubic-bezier(.2,.7,.25,1)", fill: "backwards" }, start);
   }
   return moved;
+}
+function populateTrackedTeams(teams) {
+  const select = $("track-team");
+  select.replaceChildren(new Option("None", ""));
+  teams.forEach(team => {
+    const option = new Option(`${teamName(team)} (${team.id})`, team.id);
+    select.add(option);
+  });
+  select.disabled = teams.length === 0;
+  select.value = "";
+  trackedTeamId = "";
+}
+function updateTrackedTeam() {
+  trackedTeamId = $("track-team").value;
+  document.querySelectorAll(".scorecard").forEach(node => {
+    node.classList.toggle("tracked-team", node.dataset.teamId === trackedTeamId);
+  });
 }
 function animateFlips(flips, startTime) {
   flips.forEach(({ slot, incoming, outgoing }) => {
@@ -433,6 +452,7 @@ $("play").addEventListener("click", () => {
 $("previous").addEventListener("click", () => jump(Math.max(0, current - 1)));
 $("next").addEventListener("click", () => jump(Math.min(thefts.length, current + 1), true));
 $("timeline").addEventListener("input", event => jump(Number(event.target.value)));
+$("track-team").addEventListener("change", updateTrackedTeam);
 $("speed").addEventListener("change", () => {
   captureInterval();
   for (const animation of activeAnimations) {
@@ -485,6 +505,7 @@ async function load() {
     const teams = engine.parseScorecards(responses[0]);
     thefts = engine.parseThefts(responses[1], teams);
     states = engine.snapshots(teams, thefts);
+    populateTrackedTeams(teams);
     $("team-count").textContent = String(teams.length);
     $("steal-count").textContent = String(thefts.length);
     $("timeline").max = String(thefts.length);

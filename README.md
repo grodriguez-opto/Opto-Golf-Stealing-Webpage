@@ -19,6 +19,8 @@ Names may repeat, including on different teams. Identity is team ID plus player 
 
 The page displays each team's two player names followed by its numeric ID in smaller text. The ID is announced as a team number for screen readers. IDs remain in the CSVs and internal references so duplicate names do not affect scoring.
 
+Use the **Track Team** menu above Scores to add a yellow outline to that team's cards in both the theft panel and standings. It starts at **None**. The team ID appears in the menu so teams with repeated player names can be distinguished.
+
 The team score for each hole is the **higher** of the two players' scores. The team total is the sum of those nine values; lower totals rank first and tied totals share a rank. Scores cards are ordered from first place at the top left to last place at the bottom right, using numeric team ID as the stable tie-break order. Cards animate to their new grid positions after a standings change. Thefts are two-way swaps applied sequentially, including when a cell is swapped repeatedly.
 
 ## Replay controls

@@ -115,9 +115,15 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
     await viewport(1440);
     await send("Page.navigate", { url: `http://127.0.0.1:${server.address().port}/Opto-Golf-Stealing-Webpage/` });
     for (let i = 0; i < 50; i++) {
-      if (await evaluate(`document.querySelectorAll("#scorecards > article").length === ${teams.length}`)) break;
+      if (await evaluate(`document.querySelectorAll("#scorecards > article").length === ${teams.length} || !document.getElementById("error").hidden`)) break;
       await sleep(50);
     }
+    const loadError = await evaluate('document.getElementById("error").hidden?"":document.getElementById("error").textContent');
+    const startup = await evaluate(`({cards:document.querySelectorAll("#scorecards > article").length,
+      teamCount:document.getElementById("team-count").textContent,disabled:document.getElementById("track-team").disabled,
+      error:document.getElementById("error").textContent,hidden:document.getElementById("error").hidden})`);
+    assert.equal(startup.cards, teams.length, JSON.stringify(startup));
+    assert.equal(loadError, "", loadError);
     await evaluate('document.fonts.ready.then(()=>{document.getElementById("play").click();return true;})');
 
     await t.test("small accessible team IDs follow names on cards, leaders and events", async () => {
@@ -146,13 +152,76 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       await verifyState(1);
     });
 
+    await t.test("Track Team defaults to None and highlights the selected ID through re-renders", async () => {
+      await scrub(0);
+      const repeated = teams.filter(team => team.players.some(player => player.name === "Vieng"));
+      assert.deepEqual(repeated.map(team => team.id), ["5", "10"]);
+      const options = await evaluate(`(()=>{const s=document.getElementById("track-team");return {
+        disabled:s.disabled,value:s.value,
+        labels:[...s.options].map(o=>o.textContent),
+        expected:${JSON.stringify(teams.map(team => `${team.players.map(player => player.name).join(" & ")} (${team.id})`))}
+      }})()`);
+      assert.equal(options.disabled, false);
+      assert.equal(options.value, "");
+      assert.equal(options.labels[0], "None");
+      assert.deepEqual(options.labels.slice(1), options.expected);
+      assert.equal(await evaluate('document.querySelector(\'label[for="track-team"]\').textContent'), "Track Team");
+      assert.notEqual(options.labels.find(label=>label.endsWith("(5)")), options.labels.find(label=>label.endsWith("(10)")));
+
+      const trackedId = thefts[0].stealer.teamId;
+      const dimensions = await evaluate(`(()=>{const n=document.querySelector('#scorecards > [data-team-id="${trackedId}"]'),r=n.getBoundingClientRect();return [r.width,r.height]})()`);
+      await evaluate(`(()=>{const s=document.getElementById("track-team");s.value="${trackedId}";s.dispatchEvent(new Event("change",{bubbles:true}));return true})()`);
+      const selected = await evaluate(`({
+        selected:document.querySelectorAll('.scorecard.tracked-team').length,
+        grid:document.querySelector('#scorecards > [data-team-id="${trackedId}"]').classList.contains("tracked-team"),
+        bounds:(()=>{const r=document.querySelector('#scorecards > [data-team-id="${trackedId}"]').getBoundingClientRect();return [r.width,r.height]})()
+      })`);
+      assert.equal(selected.selected, 2);
+      assert.equal(selected.grid, true);
+      assert.deepEqual(selected.bounds, dimensions);
+      await scrub(1);
+      await sleep(600);
+      assert.equal(await evaluate(`document.querySelectorAll('.scorecard[data-team-id="${trackedId}"].tracked-team').length`), 2);
+      await evaluate("window.scrollTo(0,0);true");
+      await screenshot("turkey-putt-track-team.png");
+      await scrub(2);
+      await sleep(600);
+      assert.equal(await evaluate(`document.querySelectorAll('.scorecard[data-team-id="${trackedId}"].tracked-team').length`), 2);
+      assert.equal(await evaluate(`getComputedStyle(document.querySelector('#scorecards > [data-team-id="${trackedId}"]')).outlineColor`), "rgb(242, 196, 0)");
+      await evaluate('document.getElementById("track-team").value="";document.getElementById("track-team").dispatchEvent(new Event("change",{bubbles:true}));true');
+      assert.equal(await evaluate('document.querySelectorAll(".scorecard.tracked-team").length'), 0);
+      const secondDuplicate = repeated.find(team => team.id !== trackedId).id;
+      await evaluate(`(()=>{const s=document.getElementById("track-team");s.value="${secondDuplicate}";s.dispatchEvent(new Event("change",{bubbles:true}));return true})()`);
+      await scrub(0);
+      await scrub(1);
+      await sleep(600);
+      assert.equal(await evaluate(`document.querySelectorAll('.scorecard.tracked-team[data-team-id="${secondDuplicate}"]').length`), 1);
+      assert.equal(await evaluate(`document.querySelectorAll('.scorecard.tracked-team[data-team-id="${trackedId}"]').length`), 0);
+      await evaluate('document.getElementById("track-team").value="";document.getElementById("track-team").dispatchEvent(new Event("change",{bubbles:true}));true');
+      await evaluate('document.getElementById("track-team").focus();true');
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+      assert.equal(await evaluate('document.getElementById("track-team").value'), teams[0].id);
+      assert.equal(await evaluate('document.activeElement.id'), "track-team");
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 });
+      assert.equal(await evaluate('document.getElementById("track-team").value'), "");
+      assert.equal(await evaluate('document.querySelectorAll(".scorecard.tracked-team").length'), 0);
+      await evaluate(`(()=>{const s=document.getElementById("track-team");s.value="${trackedId}";s.dispatchEvent(new Event("change",{bubbles:true}));s.blur();document.getElementById("speed").value="1900";document.getElementById("play").click();return true})()`);
+      await waitFor('current === 2 && phase === "scores"');
+      assert.equal(await evaluate(`document.querySelectorAll('.scorecard.tracked-team[data-team-id="${trackedId}"]').length`), 2);
+      await evaluate('pausePlayback();document.getElementById("speed").value="4800";true');
+      await scrub(0);
+    });
+
     await t.test("featured cards match grid dimensions on desktop, tablet and mobile", async () => {
       for (const width of [1440, 900, 390, 320]) {
         await viewport(width);
         await scrub(1);
         await sleep(600);
-        const sizes = await evaluate(`({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,cards:[...document.querySelectorAll(".featured-slot > .scorecard:not(.departing-card)")].map(card=>{const a=card.getBoundingClientRect(),b=document.querySelector('#scorecards > [data-team-id="'+card.dataset.teamId+'"]').getBoundingClientRect();return [a.width,a.height,b.width,b.height];})})`);
+        const sizes = await evaluate(`({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,tracker:document.getElementById("track-team").getBoundingClientRect().width,cards:[...document.querySelectorAll(".featured-slot > .scorecard:not(.departing-card)")].map(card=>{const a=card.getBoundingClientRect(),b=document.querySelector('#scorecards > [data-team-id="'+card.dataset.teamId+'"]').getBoundingClientRect();return [a.width,a.height,b.width,b.height];})})`);
         assert.ok(sizes.scrollWidth <= width, JSON.stringify(sizes));
+        assert.ok(sizes.tracker > 0);
         sizes.cards.forEach(([w, h, gridW, gridH]) => {
           assert.ok(Math.abs(w - gridW) < .5, `${width}: widths ${w} / ${gridW}`);
           assert.ok(Math.abs(h - gridH) < .5, `${width}: heights ${h} / ${gridH}`);

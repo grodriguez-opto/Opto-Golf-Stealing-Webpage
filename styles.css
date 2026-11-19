@@ -122,7 +122,11 @@ thead th:first-child { font-size: 9px; }
 .legend-dot.stolen { background: var(--blue); }
 .all-scores { padding: 34px 0 26px; }
 .score-note { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.score-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.score-tools label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.score-tools select { max-width: min(260px, 30vw); }
 .scorecard-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; overflow-anchor: none; }
+.scorecard.tracked-team { outline: 3px solid #f2c400; outline-offset: -4px; }
 .rules { border-block: 1px solid var(--line); padding: 20px 0; margin-bottom: 24px; color: var(--muted); font-size: 13px; }
 summary { color: #333; font-weight: 500; list-style: none; cursor: pointer; }
 summary span { float: right; }
@@ -166,7 +170,10 @@ summary span { float: right; }
   .event-caption p { font-size: 11px; }
   .event-icon { flex-basis: 22px; font-size: 24px; }
   .scorecard-grid, .swap-stage { grid-template-columns: 1fr; gap: 14px; }
-  .score-note { max-width: 165px; text-align: right; font-size: 11px; }
+  .all-scores > .section-heading { align-items: flex-start; flex-wrap: wrap; }
+  .score-tools { order: 3; width: 100%; margin-left: 0; }
+  .score-tools select { max-width: none; min-width: 0; flex: 1; }
+  .score-note { max-width: 165px; text-align: right; font-size: 11px; margin-left: auto; }
   .card-heading { padding-inline: 12px; }
   .card-footer { padding-inline: 12px; }
   .strokes { font-size: 9px; }
