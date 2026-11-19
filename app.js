@@ -21,18 +21,30 @@ function el(tag, className, text) {
 function teamName(team) {
   return team.players.map(player => player.name).join(" & ");
 }
+function teamLabel(team) {
+  const label = el("span", "team-label", teamName(team));
+  const id = el("small", "team-id");
+  id.append(el("span", "sr-only", "Team "), document.createTextNode(team.id));
+  label.append(document.createTextNode(" "), id);
+  return label;
+}
+function accessibleTeamName(team) {
+  return `${teamName(team)}, team ${team.id}`;
+}
 function card(team, rank, options = {}) {
   const score = engine.teamScore(team);
   const article = el("article", `scorecard ${options.role || ""}`);
   article.dataset.teamId = team.id;
-  article.setAttribute("aria-label", `${teamName(team)}, total ${score.total}, rank ${rank}`);
+  article.setAttribute("aria-label", `${accessibleTeamName(team)}, total ${score.total}, rank ${rank}`);
   const head = el("div", "card-heading"), identity = el("div", "team-identity");
-  identity.append(el("h3", "", teamName(team)));
+  const heading = el("h3");
+  heading.append(teamLabel(team));
+  identity.append(heading);
   const rankLabel = el("span", "rank", `Rank ${rank}`);
   rankLabel.setAttribute("aria-label", `Rank ${rank}`);
   head.append(identity, rankLabel);
   article.append(head);
-  const table = el("table"), caption = el("caption", "sr-only", `${teamName(team)} scorecard`);
+  const table = el("table"), caption = el("caption", "sr-only", `${accessibleTeamName(team)} scorecard`);
   const thead = el("thead"), header = el("tr");
   const playerHeader = el("th", "", "PLAYER"); playerHeader.scope = "col"; header.append(playerHeader);
   for (let i = 1; i <= 9; i++) {
@@ -48,7 +60,7 @@ function card(team, rank, options = {}) {
       td.dataset.cell = `${team.id}-${p}-${hole}`;
       const involved = options.cell && options.cell.player === p && options.cell.hole === hole;
       if (involved) td.classList.add("target-cell");
-      td.setAttribute("aria-label", `${teamName(team)}: ${player.name}, player ${p + 1}, hole ${hole + 1}, ${value} strokes${involved ? ", selected for swap" : ""}`);
+      td.setAttribute("aria-label", `${accessibleTeamName(team)}: ${player.name}, player ${p + 1}, hole ${hole + 1}, ${value} strokes${involved ? ", selected for swap" : ""}`);
       row.append(td);
     });
     body.append(row);
@@ -104,7 +116,12 @@ function render(step, animate = false) {
   $("previous").disabled = step === 0;
   $("next").disabled = step === thefts.length;
   const leaders = state.filter(team => rank[team.id] === 1);
-  $("leader").textContent = `${leaders.map(teamName).join(" / ")} · ${engine.teamScore(leaders[0]).total} strokes`;
+  $("leader").replaceChildren();
+  leaders.forEach((team, index) => {
+    if (index) $("leader").append(document.createTextNode(" / "));
+    $("leader").append(teamLabel(team));
+  });
+  $("leader").append(document.createTextNode(` · ${engine.teamScore(leaders[0]).total} strokes`));
   $("scorecards").replaceChildren(...engine.standings(state).map(team => {
     const role = step && theft ? team.id === theft.stealer.teamId ? "stealing" : team.id === theft.victim.teamId ? "stolen" : "" : "";
     return card(team, rank[team.id], { role, cell: role === "stealing" ? theft.stealer : role === "stolen" ? theft.victim : null });
@@ -122,9 +139,9 @@ function render(step, animate = false) {
   const playerA = a.players[theft.stealer.player].name, playerB = b.players[theft.victim.player].name;
   if (step === 0) {
     $("event-title").textContent = "Original scores";
-    $("event-description").textContent = `First steal: ${teamName(a)} swap with ${teamName(b)}.`;
+    $("event-description").replaceChildren("First steal: ", teamLabel(a), " swap with ", teamLabel(b), ".");
   } else {
-    $("event-title").textContent = `${teamName(a)} steal from ${teamName(b)}`;
+    $("event-title").replaceChildren(teamLabel(a), " steal from ", teamLabel(b));
     $("event-description").textContent = `${playerA}, hole ${theft.stealer.hole + 1} (${engine.getCell(previous, theft.stealer)}) ↔ ${playerB}, hole ${theft.victim.hole + 1} (${engine.getCell(previous, theft.victim)}). ${playerA} receives ${engine.getCell(state, theft.stealer)}; ${playerB} receives ${engine.getCell(state, theft.victim)}.`;
   }
   const before = step ? {

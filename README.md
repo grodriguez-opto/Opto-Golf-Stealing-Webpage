@@ -17,7 +17,7 @@ Edit or replace the CSVs in `data/`, keeping their filenames and headers:
 
 Names may repeat, including on different teams. Identity is team ID plus player order, never name. CSV quoted fields, escaped quotes, CRLF/LF, and blank rows are supported. Invalid data displays a visible error instead of partial scores.
 
-The page displays each team's two player names instead of its numeric ID. IDs remain in the CSVs and internal references so duplicate names do not affect scoring.
+The page displays each team's two player names followed by its numeric ID in smaller text. The ID is announced as a team number for screen readers. IDs remain in the CSVs and internal references so duplicate names do not affect scoring.
 
 The team score for each hole is the **higher** of the two players' scores. The team total is the sum of those nine values; lower totals rank first and tied totals share a rank. Scores cards are ordered from first place at the top left to last place at the bottom right, using numeric team ID as the stable tie-break order. Cards animate to their new grid positions after a standings change. Thefts are two-way swaps applied sequentially, including when a cell is swapped repeatedly.
 

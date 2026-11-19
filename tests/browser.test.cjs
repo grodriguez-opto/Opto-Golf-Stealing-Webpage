@@ -110,6 +110,32 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
     }
     await evaluate('document.fonts.ready.then(()=>{document.getElementById("play").click();return true;})');
 
+    await t.test("small accessible team IDs follow names on cards, leaders and events", async () => {
+      await scrub(0);
+      await sleep(600);
+      const labels = await evaluate(`({
+        cards:[...document.querySelectorAll(".scorecard:not(.departing-card)")].map(card=>{
+          const label=card.querySelector("h3 .team-label"),id=label.querySelector(".team-id");
+          return {id:card.dataset.teamId,number:id.lastChild.textContent,context:id.querySelector(".sr-only").textContent,
+            smaller:parseFloat(getComputedStyle(id).fontSize)<parseFloat(getComputedStyle(label).fontSize),
+            accessible:card.getAttribute("aria-label").includes("team "+card.dataset.teamId)};
+        }),
+        leader:document.querySelectorAll("#leader .team-id").length,
+        first:document.querySelectorAll("#event-description .team-id").length
+      })`);
+      labels.cards.forEach(label => {
+        assert.equal(label.number, label.id);
+        assert.equal(label.context, "Team ");
+        assert.equal(label.smaller, true);
+        assert.equal(label.accessible, true);
+      });
+      assert.ok(labels.leader > 0);
+      assert.equal(labels.first, 2);
+      await scrub(1);
+      assert.equal(await evaluate('document.querySelectorAll("#event-title .team-id").length'), 2);
+      await verifyState(1);
+    });
+
     await t.test("featured cards match grid dimensions on desktop, tablet and mobile", async () => {
       for (const width of [1440, 900, 390, 320]) {
         await viewport(width);

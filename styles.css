@@ -90,6 +90,7 @@ h3 { margin: 0; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
 .scorecard.stolen { border-top-color: var(--blue); }
 .card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 17px 16px 12px; }
 .team-identity { min-width: 0; }
+.team-id { color: var(--muted); font-size: .72em; font-weight: 400; white-space: nowrap; }
 .rank { background: #eee; color: #555; padding: 4px 6px; font-size: 11px; flex-shrink: 0; }
 table { width: calc(100% - 28px); margin: 0 14px; border-collapse: collapse; table-layout: fixed; font-size: 12px; text-align: center; }
 th, td { height: 33px; font-weight: 400; padding: 0 1px; font-variant-numeric: tabular-nums; }
