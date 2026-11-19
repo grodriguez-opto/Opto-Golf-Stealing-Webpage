@@ -92,7 +92,7 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
     };
     const verifyState = async step => {
       const actual = await evaluate(`[...document.querySelectorAll("#scorecards > article")].map(card=>({id:card.dataset.teamId,scores:[...card.querySelectorAll("[data-cell]")].map(cell=>Number(cell.textContent)),total:Number(card.querySelector(".total-number strong").textContent)}))`);
-      assert.deepEqual(actual, states[step].map(team => ({
+      assert.deepEqual(actual, engine.standings(states[step]).map(team => ({
         id: team.id, scores: team.players.flatMap(player => player.scores), total: engine.teamScore(team).total
       })));
     };
@@ -114,7 +114,7 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       for (const width of [1440, 900, 390, 320]) {
         await viewport(width);
         await scrub(1);
-        await sleep(450);
+        await sleep(600);
         const sizes = await evaluate(`({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,cards:[...document.querySelectorAll(".featured-slot > .scorecard:not(.departing-card)")].map(card=>{const a=card.getBoundingClientRect(),b=document.querySelector('#scorecards > [data-team-id="'+card.dataset.teamId+'"]').getBoundingClientRect();return [a.width,a.height,b.width,b.height];})})`);
         assert.ok(sizes.scrollWidth <= width, JSON.stringify(sizes));
         sizes.cards.forEach(([w, h, gridW, gridH]) => {
@@ -124,23 +124,123 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       }
     });
 
-    await t.test("deck changes precede four synchronized score flights", async () => {
-      await viewport(1440, 1500);
+    await t.test("horizontal flip hides new content until midpoint and never mirrors text", async () => {
+      await viewport(1440);
       await scrub(1);
-      await sleep(450);
+      await sleep(600);
       await evaluate('document.getElementById("next").click();true');
       await frames();
-      const timing = await evaluate(`({flights:[...document.querySelectorAll(".flying-score")].map(node=>{const a=node.getAnimations()[0];return {section:node.dataset.section,value:node.textContent,start:a.startTime,duration:a.effect.getTiming().duration};}),departing:document.querySelectorAll(".departing-card").length,deckStart:document.querySelector(".departing-card").getAnimations()[0].startTime})`);
+      const sample = async time => evaluate(`(()=>{
+        const slot=document.querySelector(".is-flipping");
+        const incoming=slot.querySelector(".flip-incoming"),outgoing=slot.querySelector(".departing-card");
+        [incoming,outgoing].forEach(n=>{const a=n.getAnimations()[0];a.pause();a.currentTime=${time};});
+        const info=n=>({visibility:getComputedStyle(n).visibility,scale:new DOMMatrix(getComputedStyle(n).transform).m11,text:n.querySelector("h3").textContent});
+        return {incoming:info(incoming),outgoing:info(outgoing),stable:document.querySelector(".featured-slot").classList.contains("is-flipping")};
+      })()`);
+      const first = await sample(125);
+      assert.equal(first.incoming.visibility, "hidden");
+      assert.equal(first.outgoing.visibility, "visible");
+      assert.ok(first.outgoing.scale > 0 && first.outgoing.scale < 1);
+      assert.equal(first.stable, false);
+      await screenshot("turkey-putt-flip-old.png");
+      const midpoint = await sample(250);
+      assert.equal(midpoint.outgoing.visibility, "hidden");
+      assert.equal(midpoint.incoming.visibility, "hidden");
+      assert.ok(Math.abs(midpoint.incoming.scale) < .001);
+      const second = await sample(375);
+      assert.equal(second.outgoing.visibility, "hidden");
+      assert.equal(second.incoming.visibility, "visible");
+      assert.ok(second.incoming.scale > 0 && second.incoming.scale < 1);
+      assert.notEqual(first.outgoing.text, second.incoming.text);
+      await screenshot("turkey-putt-flip.png");
+      await scrub(2);
+    });
+
+    await t.test("rank changes animate actual cards from old positions to sorted grid positions", async () => {
+      const step = states.findIndex((state, index) => index > 0 &&
+        engine.standings(state).map(t => t.id).join() !== engine.standings(states[index - 1]).map(t => t.id).join());
+      assert.ok(step > 0, "The round needs a standings change to exercise position animation");
+      await scrub(step - 1);
+      await sleep(600);
+      await evaluate('window.oldGridPositions=Object.fromEntries([...document.querySelectorAll("#scorecards > article")].map(n=>[n.dataset.teamId,{x:n.getBoundingClientRect().x,y:n.getBoundingClientRect().y}]));document.getElementById("next").click();true');
+      await frames();
+      const moving = await evaluate(`(()=>{
+        const cards=[...document.querySelectorAll("#scorecards > article")];
+        return cards.filter(n=>n.getAnimations().length).map(n=>{
+          const a=n.getAnimations()[0];a.pause();a.currentTime=0;
+          const from=n.getBoundingClientRect(),original=window.oldGridPositions[n.dataset.teamId];
+          a.currentTime=250;const half=n.getBoundingClientRect();
+          a.currentTime=500;const to=n.getBoundingClientRect();
+          return {id:n.dataset.teamId,from:{x:from.x,y:from.y},half:{x:half.x,y:half.y},to:{x:to.x,y:to.y},original};
+        });
+      })()`);
+      assert.ok(moving.length > 1);
+      moving.forEach(({ from, half, to, original }) => {
+        assert.ok(Math.abs(from.x - original.x) < 1 && Math.abs(from.y - original.y) < 1);
+        assert.ok(Math.hypot(to.x - from.x, to.y - from.y) > 1);
+        assert.ok(Math.hypot(half.x - from.x, half.y - from.y) > .5);
+        assert.ok(Math.hypot(half.x - to.x, half.y - to.y) > .5);
+      });
+      await verifyState(step);
+      await evaluate('document.querySelectorAll("#scorecards > article").forEach(n=>n.getAnimations().forEach(a=>a.currentTime=250));window.scrollTo(0,document.getElementById("scorecards").offsetTop-80);true');
+      await screenshot("turkey-putt-standings.png");
+      await scrub(step);
+      await sleep(600);
+      await evaluate('document.getElementById("previous").click();true');
+      await frames();
+      await verifyState(step - 1);
+      assert.ok(await evaluate('document.querySelectorAll("#scorecards > article").length>0 && [...document.querySelectorAll("#scorecards > article")].some(n=>n.getAnimations().length>0)'));
+      await sleep(600);
+      const positions = await evaluate('[...document.querySelectorAll("#scorecards > article")].map(n=>({x:n.getBoundingClientRect().x,y:n.getBoundingClientRect().y}))');
+      positions.slice(1).forEach((position, index) => {
+        const previous = positions[index];
+        assert.ok(position.y > previous.y + 1 || (Math.abs(position.y - previous.y) < 1 && position.x > previous.x));
+      });
+      await evaluate("window.scrollTo(0,0);true");
+    });
+
+    await t.test("bottom controls stay fixed, reserve space, and remain keyboard accessible", async () => {
+      for (const width of [1440, 900, 390, 320]) {
+        await viewport(width, 900);
+        const measure = () => evaluate(`(()=>{
+          const controls=document.querySelector(".timeline-controls"),box=controls.getBoundingClientRect();
+          return {top:box.top,bottom:box.bottom,height:box.height,innerHeight,padding:parseFloat(getComputedStyle(document.body).paddingBottom),overflow:document.documentElement.scrollWidth>innerWidth};
+        })()`);
+        await evaluate("window.scrollTo(0,0);true");
+        const top = await measure();
+        await evaluate("window.scrollTo(0,document.documentElement.scrollHeight);true");
+        await frames();
+        const bottom = await measure();
+        assert.ok(Math.abs(top.bottom - 900) < 1 && Math.abs(bottom.bottom - 900) < 1);
+        assert.ok(top.padding >= top.height && bottom.padding >= bottom.height);
+        assert.equal(bottom.overflow, false);
+        assert.ok(await evaluate('document.querySelector("footer").getBoundingClientRect().bottom <= document.querySelector(".timeline-controls").getBoundingClientRect().top'));
+      }
+      await evaluate('document.getElementById("timeline").focus();true');
+      const before = await evaluate('Number(document.getElementById("timeline").value)');
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+      await verifyState(before + 1);
+      assert.equal(await evaluate('document.activeElement.id'), "timeline");
+      await evaluate("document.activeElement.blur();window.scrollTo(0,0);true");
+    });
+
+    await t.test("flips and grid movement precede four synchronized score flights", async () => {
+      await viewport(1440, 1500);
+      await scrub(1);
+      await sleep(600);
+      await evaluate('document.getElementById("next").click();true');
+      await frames();
+      const timing = await evaluate(`({flights:[...document.querySelectorAll(".flying-score")].map(node=>{const a=node.getAnimations()[0];return {section:node.dataset.section,value:node.textContent,start:a.startTime,duration:a.effect.getTiming().duration};}),departing:document.querySelectorAll(".departing-card").length,flipStart:document.querySelector(".departing-card").getAnimations()[0].startTime})`);
       assert.equal(timing.departing, 1);
       assert.deepEqual(timing.flights.map(f => f.section), ["swap-stage", "swap-stage", "scorecards", "scorecards"]);
       assert.deepEqual(timing.flights.map(f => f.value), flightValues(2));
       assert.equal(new Set(timing.flights.map(f => f.start)).size, 1);
       timing.flights.forEach(f => {
         assert.equal(f.duration, 1250);
-        assert.ok(Math.abs(f.start - timing.deckStart - 380) < .001);
+        assert.ok(Math.abs(f.start - timing.flipStart - 500) < .001);
       });
       await verifyState(2);
-      await screenshot("turkey-putt-shuffle.png");
       await sleep(700);
       await evaluate(`window.scrollTo(0,document.querySelector('#scorecards > [data-team-id="${thefts[1].stealer.teamId}"]').offsetTop-100);true`);
       await frames();
@@ -156,7 +256,7 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
     await t.test("pause freezes motions and play resumes without changing scores", async () => {
       await viewport(1440);
       await scrub(1);
-      await sleep(450);
+      await sleep(600);
       await evaluate('document.getElementById("next").click();document.getElementById("play").click();document.getElementById("play").click();true');
       await frames();
       const times = await evaluate("document.getAnimations().map(a=>({time:a.currentTime,state:a.playState}))");
@@ -182,13 +282,13 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
         await scrub(step);
         await verifyState(step);
       }
-      await sleep(500);
+      await sleep(600);
       assert.equal(await evaluate('document.querySelectorAll(".flying-score,.departing-card").length'), 0);
     });
 
     await t.test("repeated cells, scroll, and resize never duplicate a swap", async () => {
       await scrub(7);
-      await sleep(450);
+      await sleep(600);
       await evaluate('document.getElementById("next").click();true');
       await frames();
       assert.deepEqual(await evaluate('[...document.querySelectorAll(".flying-score")].map(n=>n.textContent)'), flightValues(8));
@@ -211,7 +311,7 @@ test("browser replay and animation lifecycle", { skip: !chrome && "Set CHROME_PA
       const changed = thefts.findIndex((event, index) => index > 0 && event.stealer.teamId !== thefts[index - 1].stealer.teamId);
       if (changed >= 0) {
         await scrub(changed);
-        await sleep(450);
+        await sleep(600);
         await evaluate('document.getElementById("next").click();true');
         await frames();
         await verifyState(changed + 1);

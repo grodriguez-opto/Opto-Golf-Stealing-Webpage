@@ -97,7 +97,10 @@
     const totals = teams.map(team => teamScore(team).total).sort((a, b) => a - b);
     return Object.fromEntries(teams.map(team => [team.id, totals.indexOf(teamScore(team).total) + 1]));
   }
-  const api = { parseCSV, parseScorecards, parseThefts, snapshots, teamScore, getCell, ranks };
+  function standings(teams) {
+    return [...teams].sort((a, b) => teamScore(a).total - teamScore(b).total || Number(a.id) - Number(b.id));
+  }
+  const api = { parseCSV, parseScorecards, parseThefts, snapshots, teamScore, getCell, ranks, standings };
   root.GolfReplay = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

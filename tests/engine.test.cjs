@@ -66,6 +66,14 @@ test("ties share a rank and an empty log keeps the original state", () => {
   assert.equal(engine.parseThefts(theftsCSV.split("\n")[0], teams).length, 0);
   assert.deepEqual(engine.snapshots(teams, []), [teams]);
 });
+test("standings use ascending total, then numeric ID for stable ties, without mutating input", () => {
+  const tied = [{ ...team(teams, 1), id: "10" }, { ...team(teams, 1), id: "2" }];
+  const input = [tied[0], team(teams, 18), tied[1]];
+  assert.deepEqual(engine.standings(input).map(t => t.id), ["18", "2", "10"]);
+  assert.deepEqual(input.map(t => t.id), ["10", "18", "2"]);
+  const rank = engine.ranks(input);
+  assert.equal(rank["2"], rank["10"]);
+});
 
 test("the editable round is valid and every swap preserves its scores", () => {
   const configuredTeams = engine.parseScorecards(fs.readFileSync(path.join(__dirname, "..", "data", "scorecards.csv"), "utf8"));

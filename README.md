@@ -19,13 +19,15 @@ Names may repeat, including on different teams. Identity is team ID plus player 
 
 The page displays each team's two player names instead of its numeric ID. IDs remain in the CSVs and internal references so duplicate names do not affect scoring.
 
-The team score for each hole is the **higher** of the two players' scores. The team total is the sum of those nine values; lower totals rank first and tied totals share a rank. Thefts are two-way swaps applied sequentially, including when a cell is swapped repeatedly.
+The team score for each hole is the **higher** of the two players' scores. The team total is the sum of those nine values; lower totals rank first and tied totals share a rank. Scores cards are ordered from first place at the top left to last place at the bottom right, using numeric team ID as the stable tie-break order. Cards animate to their new grid positions after a standings change. Thefts are two-way swaps applied sequentially, including when a cell is swapped repeatedly.
 
 ## Replay controls
 
-The replay autoplays once, stopping after the final steal. Use play/pause, previous/next, the speed selector, or the timeline slider to inspect any state. Scrubbing pauses playback. Featured cards match the Scores grid's card sizes. When a featured team changes, its card slides in like a card being shuffled into a deck. The score exchange then plays in both sections with the same values and timing; the theft is applied only once. Equal-valued scores still swap, with no change to cell values.
+Playback controls stay fixed at the bottom of the viewport, with reserved page space and mobile safe-area padding so they do not obscure the last cards or footer.
 
-Pause freezes active card and score animations as well as playback; Play resumes them. Scrubbing or resizing cancels old animations and shows the selected state. Scrolling does not interrupt the synchronized score exchanges. Reduced-motion preferences disable autoplay and both animation types; manual timeline controls still work. Playback also pauses when the tab is hidden.
+The replay autoplays once, stopping after the final steal. Use play/pause, previous/next, the speed selector, or the timeline slider to inspect any state. Scrubbing pauses playback. Featured cards match the Scores grid's card sizes. When a featured team changes, its old card flips horizontally to the edge-on midpoint before the new card appears. The unchanged team's card stays in place. After the flip and standings movement settle, the score exchange plays in both sections with the same values and timing; the theft is applied only once. Equal-valued scores still swap, with no change to cell values.
+
+Pause freezes active card, standings, and score animations as well as playback; Play resumes them. Scrubbing cancels stale motions before animating to the selected standings. Resizing cancels motion and shows the current state in the new layout. Scrolling does not interrupt the synchronized score exchanges. Reduced-motion preferences disable autoplay and all animation types; manual timeline controls still work. Playback also pauses when the tab is hidden.
 
 ## Styling
 
@@ -49,10 +51,10 @@ node --test tests\engine.test.cjs
 
 Engine regression tests keep the original round in `tests/fixtures/`, separate from the editable CSVs. They also validate the current round.
 
-Browser regression tests require Node 22+ and Chrome or Edge on Windows (or set `CHROME_PATH` to a Chromium executable). They start their own local server and check card sizes, synchronized animations, cancellation, pause/resume, and reduced motion against the current round:
+Browser regression tests require Node 22+ and Chrome or Edge on Windows (or set `CHROME_PATH` to a Chromium executable). They start their own local server and check card sizes, flip midpoint visibility, standings order and motion, fixed controls, synchronized animations, cancellation, pause/resume, and reduced motion against the current round:
 
 ```powershell
 node --test tests\browser.test.cjs
 ```
 
-Set `SCREENSHOT_DIR` to save desktop, mobile, deck-transition, and score-swap screenshots during the browser run.
+Set `SCREENSHOT_DIR` to save desktop, mobile, flip-transition, standings, and score-swap screenshots during the browser run.
