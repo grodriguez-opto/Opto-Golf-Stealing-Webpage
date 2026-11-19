@@ -1,4 +1,4 @@
-# Turkey Putt — The scorecard shuffle
+# Opto 22 mini golf scores
 
 A pure HTML/CSS/JavaScript mini golf score replay. No build, packages, accounts, or backend required. All resources use relative paths, including on a GitHub Pages project site.
 
@@ -17,6 +17,8 @@ Edit or replace the CSVs in `data/`, keeping their filenames and headers:
 
 Names may repeat, including on different teams. Identity is team ID plus player order, never name. CSV quoted fields, escaped quotes, CRLF/LF, and blank rows are supported. Invalid data displays a visible error instead of partial scores.
 
+The page displays each team's two player names instead of its numeric ID. IDs remain in the CSVs and internal references so duplicate names do not affect scoring.
+
 The team score for each hole is the **higher** of the two players' scores. The team total is the sum of those nine values; lower totals rank first and tied totals share a rank. Thefts are two-way swaps applied sequentially, including when a cell is swapped repeatedly.
 
 ## Replay controls
@@ -24,6 +26,10 @@ The team score for each hole is the **higher** of the two players' scores. The t
 The replay autoplays once, stopping after the final steal. Use play/pause, previous/next, the speed selector, or the timeline slider to inspect any state. Scrubbing pauses playback. The featured pair of scorecards keeps both swapped cells visible, with two flying scores and updated totals; all teams remain visible in the grid below. The final steal in the supplied data exchanges two `1` scores, so it correctly leaves both values unchanged.
 
 Reduced-motion preferences disable autoplay and flying-score animations; manual timeline controls still work. Playback also pauses when the tab is hidden.
+
+## Styling
+
+The red (`#c52f2e`), blue (`#0e72b0`), white/light-gray panels, and Rubik typeface follow the styling inspected at [opto22.com](https://www.opto22.com/) and its `assets/css/opto.css` stylesheet. The fonts are served locally with their SIL Open Font License in `assets/fonts/`. No external requests are needed to display the page.
 
 ## Local preview and tests
 

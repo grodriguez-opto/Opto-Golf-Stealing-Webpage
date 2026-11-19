@@ -13,15 +13,21 @@ function el(tag, className, text) {
   if (text !== undefined) node.textContent = text;
   return node;
 }
+function teamName(team) {
+  return team.players.map(player => player.name).join(" & ");
+}
 function card(team, rank, options = {}) {
   const score = engine.teamScore(team);
   const article = el("article", `scorecard ${options.role || ""}`);
-  article.setAttribute("aria-label", `Team ${team.id}, ${team.players.map(player => player.name).join(" and ")}, total ${score.total}, rank ${rank}`);
+  article.dataset.teamId = team.id;
+  article.setAttribute("aria-label", `${teamName(team)}, total ${score.total}, rank ${rank}`);
   const head = el("div", "card-heading"), identity = el("div", "team-identity");
-  identity.append(el("span", "team-avatar", team.id), el("h3", "", `Team ${team.id}`));
-  head.append(identity, el("span", "rank", `#${rank}`));
+  identity.append(el("h3", "", teamName(team)));
+  const rankLabel = el("span", "rank", `Rank ${rank}`);
+  rankLabel.setAttribute("aria-label", `Rank ${rank}`);
+  head.append(identity, rankLabel);
   article.append(head);
-  const table = el("table"), caption = el("caption", "sr-only", `Team ${team.id} scorecard`);
+  const table = el("table"), caption = el("caption", "sr-only", `${teamName(team)} scorecard`);
   const thead = el("thead"), header = el("tr");
   const playerHeader = el("th", "", "PLAYER"); playerHeader.scope = "col"; header.append(playerHeader);
   for (let i = 1; i <= 9; i++) {
@@ -37,7 +43,7 @@ function card(team, rank, options = {}) {
       td.dataset.cell = `${team.id}-${p}-${hole}`;
       const involved = options.cell && options.cell.player === p && options.cell.hole === hole;
       if (involved) td.classList.add("target-cell");
-      td.setAttribute("aria-label", `${player.name}, hole ${hole + 1}, ${value} strokes${involved ? ", swapped score" : ""}`);
+      td.setAttribute("aria-label", `${teamName(team)}: ${player.name}, player ${p + 1}, hole ${hole + 1}, ${value} strokes${involved ? ", selected for swap" : ""}`);
       row.append(td);
     });
     body.append(row);
@@ -47,7 +53,7 @@ function card(team, rank, options = {}) {
   score.holes.forEach(value => totalRow.append(el("td", "", String(value))));
   body.append(totalRow); table.append(body); article.append(table);
   const footer = el("div", "card-footer");
-  const label = el("span", "", options.role === "stealing" ? "STEALING TEAM" : options.role === "stolen" ? "SWAPPING PARTNER" : "TEAM TOTAL");
+  const label = el("span", "", options.role === "stealing" ? "Stealing team" : options.role === "stolen" ? "Stolen from" : "Total");
   const number = el("div", "total-number");
   if (options.before !== undefined) {
     const delta = score.total - options.before;
@@ -70,13 +76,13 @@ function render(step, animate = false) {
   const state = states[step], rank = engine.ranks(state);
   const theft = thefts[step === 0 ? 0 : step - 1];
   $("timeline").value = String(step);
-  $("timeline").setAttribute("aria-valuetext", step === 0 ? "Original scorecards, no steals applied" : `Steal ${step} of ${thefts.length}`);
+  $("timeline").setAttribute("aria-valuetext", step === 0 ? "Original scores, no steals applied" : `Steal ${step} of ${thefts.length}`);
   $("timeline").style.setProperty("--progress", `${thefts.length ? step / thefts.length * 100 : 0}%`);
-  $("step-counter").textContent = step === 0 ? "Original scorecards" : `Steal ${String(step).padStart(2, "0")} / ${String(thefts.length).padStart(2, "0")}`;
+  $("step-counter").textContent = step === 0 ? "Original scores" : `Steal ${step} of ${thefts.length}`;
   $("previous").disabled = step === 0;
   $("next").disabled = step === thefts.length;
   const leaders = state.filter(team => rank[team.id] === 1);
-  $("leader").textContent = `${leaders.map(team => `Team ${team.id}`).join(" & ")} · ${engine.teamScore(leaders[0]).total} strokes`;
+  $("leader").textContent = `${leaders.map(teamName).join(" / ")} · ${engine.teamScore(leaders[0]).total} strokes`;
   $("scorecards").replaceChildren(...state.map(team => {
     const role = step && theft ? team.id === theft.stealer.teamId ? "stealing" : team.id === theft.victim.teamId ? "stolen" : "" : "";
     return card(team, rank[team.id], { role, cell: role === "stealing" ? theft.stealer : role === "stolen" ? theft.victim : null });
@@ -84,19 +90,19 @@ function render(step, animate = false) {
   const stage = $("swap-stage");
   stage.replaceChildren();
   if (!theft) {
-    $("event-title").textContent = "The original round. No steals yet.";
-    $("event-description").textContent = "Add rows to the theft log to replay the score shuffle.";
-    stage.append(el("p", "empty-stage", "No steals in the log — these scores are safe. For now."));
+    $("event-title").textContent = "Original scores";
+    $("event-description").textContent = "No steals in the log.";
+    stage.append(el("p", "empty-stage", "Add rows to the theft log to show swaps."));
     return;
   }
   const a = state.find(team => team.id === theft.stealer.teamId), b = state.find(team => team.id === theft.victim.teamId);
   const previous = states[Math.max(0, step - 1)];
   const playerA = a.players[theft.stealer.player].name, playerB = b.players[theft.victim.player].name;
   if (step === 0) {
-    $("event-title").textContent = "The calm before the first steal.";
-    $("event-description").textContent = `Up first: Team ${a.id}'s ${playerA} has an eye on Team ${b.id}'s score. Press play or drag the timeline to explore.`;
+    $("event-title").textContent = "Original scores";
+    $("event-description").textContent = `First steal: ${teamName(a)} swap with ${teamName(b)}.`;
   } else {
-    $("event-title").textContent = `Team ${a.id} makes a move on Team ${b.id}.`;
+    $("event-title").textContent = `${teamName(a)} steal from ${teamName(b)}`;
     $("event-description").textContent = `${playerA}, hole ${theft.stealer.hole + 1} (${engine.getCell(previous, theft.stealer)}) ↔ ${playerB}, hole ${theft.victim.hole + 1} (${engine.getCell(previous, theft.victim)}). ${playerA} receives ${engine.getCell(state, theft.stealer)}; ${playerB} receives ${engine.getCell(state, theft.victim)}.`;
   }
   const before = step ? {
@@ -105,7 +111,7 @@ function render(step, animate = false) {
   } : {};
   stage.append(card(a, rank[a.id], { role: "stealing", cell: theft.stealer, before: before.a }));
   const connector = el("div", "swap-connector");
-  connector.append(el("span", "", "⇄"), el("small", "", step ? "SWAPPED" : "UP NEXT"));
+  connector.append(el("span", "", "⇄"), el("small", "", step ? "Swapped" : "Next"));
   stage.append(connector, card(b, rank[b.id], { role: "stolen", cell: theft.victim, before: before.b }));
   if (animate && step === old + 1 && !reducedMotion.matches) {
     // Measure after the replacement cards have settled into the layout.
@@ -145,7 +151,7 @@ function animateSwap(theft, before) {
 function setPlaying(value) {
   playing = value;
   clearTimeout(timer);
-  const label = value ? "Pause replay" : current === thefts.length && thefts.length ? "Replay round" : "Play replay";
+  const label = value ? "Pause" : current === thefts.length && thefts.length ? "Replay" : "Play";
   $("play").replaceChildren(document.createTextNode(value ? "Ⅱ " : "▶ "), el("span", "", label));
   $("play").setAttribute("aria-label", label);
   $("play-state").textContent = value ? "PLAYING" : current === thefts.length ? "COMPLETE" : "PAUSED";
@@ -191,7 +197,7 @@ async function load() {
     $("team-count").textContent = String(teams.length);
     $("steal-count").textContent = String(thefts.length);
     $("timeline").max = String(thefts.length);
-    $("timeline-end").textContent = `After ${thefts.length} steals`;
+    $("timeline-end").textContent = "Final scores";
     $("play").disabled = !thefts.length;
     $("timeline").disabled = !thefts.length;
     $("scorecards").setAttribute("aria-busy", "false");
@@ -199,9 +205,9 @@ async function load() {
     setPlaying(thefts.length > 0 && !reducedMotion.matches);
   } catch (error) {
     $("error").hidden = false;
-    $("error").textContent = `The round couldn't load. ${error.message} Check the CSV files and serve this folder over HTTP (or use GitHub Pages), then reload.`;
-    $("event-title").textContent = "The scorecards need a quick check.";
-    $("event-description").textContent = "Details are shown above. No incomplete scores have been displayed.";
+    $("error").textContent = `Could not load scores. ${error.message} Check the CSV files and serve this folder over HTTP or GitHub Pages, then reload.`;
+    $("event-title").textContent = "Scores unavailable";
+    $("event-description").textContent = "See the error above.";
     $("play-state").textContent = "UNAVAILABLE";
     $("leader").textContent = "Score data unavailable";
     $("scorecards").setAttribute("aria-busy", "false");
