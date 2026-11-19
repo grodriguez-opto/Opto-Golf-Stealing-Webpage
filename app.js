@@ -68,7 +68,7 @@ function card(team, rank, options = {}) {
   article.append(head);
   const table = el("table"), caption = el("caption", "sr-only", `${accessibleTeamName(team)} scorecard`);
   const thead = el("thead"), header = el("tr");
-  const playerHeader = el("th", "", "PLAYER"); playerHeader.scope = "col"; header.append(playerHeader);
+  const playerHeader = el("th", "", "Hole"); playerHeader.scope = "col"; header.append(playerHeader);
   for (let i = 1; i <= 9; i++) {
     const th = el("th", "", String(i)); th.scope = "col"; header.append(th);
   }
